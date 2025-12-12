@@ -1,6 +1,10 @@
 // lib/api.ts
 const API_BASE_URL = "https://jobs.api.mastaskillz.com";
 
+/* ------------------------------------------------------------------ */
+/*                               TYPES                                */
+/* ------------------------------------------------------------------ */
+
 export type TopPerformer = {
   shortCode: string;
   clicks: number;
@@ -29,6 +33,9 @@ export type SummaryResponse = {
   };
 };
 
+// Convenience type = just the inner data (what you usually store in state)
+export type SummaryData = SummaryResponse["data"];
+
 export type DailyBreakdown = {
   date: string; // e.g. "2025-12-08"
   totalClicks: number;
@@ -50,19 +57,22 @@ export type WeeklyResponse = {
   };
 };
 
+// Convenience type = inner weekly data only
+export type WeeklyData = WeeklyResponse["data"];
+
 // Monthly has the same shape as Weekly (per API docs/JSON)
 export type MonthlyResponse = WeeklyResponse;
+export type MonthlyData = MonthlyResponse["data"];
 
 // /analytics/range has the same shape as Weekly as well
 export type RangeResponse = WeeklyResponse;
-
-// Convenience: data-only types
-export type SummaryData = SummaryResponse["data"];
-export type WeeklyData = WeeklyResponse["data"];
-export type MonthlyData = MonthlyResponse["data"];
 export type RangeData = RangeResponse["data"];
 
 export type TimeRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
+
+/* ------------------------------------------------------------------ */
+/*                             FETCH HELPERS                          */
+/* ------------------------------------------------------------------ */
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -107,14 +117,19 @@ export async function fetchRange(
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*                        SUMMARY RANGE HELPERS                       */
+/* ------------------------------------------------------------------ */
+
 // Helpers to derive summary numbers for each time range
+// 👀 NOTE: this expects you to pass summary *data* (i.e. response.data), not the full response
 export function getSummaryForRange(
-  summary: SummaryResponse | null,
+  summary: SummaryData | null,
   range: TimeRange
 ) {
   if (!summary) return { clicks: 0, uniqueUrls: 0 };
 
-  const { today, yesterday, thisWeek, thisMonth } = summary.data;
+  const { today, yesterday, thisWeek, thisMonth } = summary;
 
   switch (range) {
     case "today":
@@ -128,11 +143,16 @@ export function getSummaryForRange(
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*                     BREAKDOWNS FOR TREND + CHARTS                  */
+/* ------------------------------------------------------------------ */
+
 // For charts & tables, we derive from weekly / monthly data
+// 👀 weekly / monthly here are *data* (response.data), not the full response
 export function getBreakdownsForRange(
-  weekly: WeeklyResponse | null,
-  monthly: MonthlyResponse | null,
-  summary: SummaryResponse | null,
+  weekly: WeeklyData | null,
+  monthly: MonthlyData | null,
+  summary: SummaryData | null,
   range: TimeRange
 ) {
   // Default empty state
@@ -141,12 +161,12 @@ export function getBreakdownsForRange(
   let topPerformers: TopPerformer[] = [];
   let trendData: { date: string; totalClicks: number }[] = [];
 
-  const hasWeekly = !!weekly && weekly.success;
-  const hasMonthly = !!monthly && monthly.success;
+  const hasWeekly = !!weekly;
+  const hasMonthly = !!monthly;
 
   // 🔹 Monthly range: use monthly endpoint if available
   if (range === "thisMonth" && hasMonthly) {
-    const m = monthly!.data;
+    const m = monthly!;
 
     trendData = m.dailyBreakdown.map((d) => ({
       date: d.date,
@@ -159,7 +179,7 @@ export function getBreakdownsForRange(
   }
   // 🔹 Default / weekly-based (today, yesterday, thisWeek)
   else if (hasWeekly) {
-    const w = weekly!.data;
+    const w = weekly!;
 
     trendData = w.dailyBreakdown.map((d) => ({
       date: d.date,
@@ -193,11 +213,11 @@ export function getBreakdownsForRange(
 
   // Prefer summary's dedicated topPerformers if present
   if (summary) {
-    if (range === "thisWeek" && summary.data.thisWeek.topPerformers) {
-      topPerformers = summary.data.thisWeek.topPerformers;
+    if (range === "thisWeek" && summary.thisWeek.topPerformers) {
+      topPerformers = summary.thisWeek.topPerformers;
     }
-    if (range === "thisMonth" && summary.data.thisMonth.topPerformers) {
-      topPerformers = summary.data.thisMonth.topPerformers;
+    if (range === "thisMonth" && summary.thisMonth.topPerformers) {
+      topPerformers = summary.thisMonth.topPerformers;
     }
   }
 
@@ -206,59 +226,5 @@ export function getBreakdownsForRange(
     jobTitleBreakdown,
     topPerformers,
     trendData,
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/*                 NEW: week-vs-week comparison helpers               */
-/* ------------------------------------------------------------------ */
-
-// Format a Date to "YYYY-MM-DD"
-function formatDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-// Get this-week and last-week ranges based on "today"
-export function getThisWeekAndLastWeekRanges(today = new Date()) {
-  // Simple rolling 7-day weeks:
-  // thisWeek: today-6 ... today
-  // lastWeek: today-13 ... today-7
-  const currentEnd = new Date(today);
-  const currentStart = new Date(today);
-  currentStart.setDate(currentEnd.getDate() - 6);
-
-  const prevEnd = new Date(currentStart);
-  prevEnd.setDate(currentStart.getDate() - 1);
-  const prevStart = new Date(prevEnd);
-  prevStart.setDate(prevEnd.getDate() - 6);
-
-  return {
-    current: {
-      startDate: formatDate(currentStart),
-      endDate: formatDate(currentEnd),
-    },
-    previous: {
-      startDate: formatDate(prevStart),
-      endDate: formatDate(prevEnd),
-    },
-  };
-}
-
-// Fetch "this week" vs "last week" using /analytics/range
-export async function fetchWeekComparison() {
-  const { current, previous } = getThisWeekAndLastWeekRanges();
-
-  const [currentRes, previousRes] = await Promise.all([
-    fetchRange(current.startDate, current.endDate),
-    fetchRange(previous.startDate, previous.endDate),
-  ]);
-
-  if (!currentRes.success || !previousRes.success) {
-    throw new Error("Failed to fetch week comparison");
-  }
-
-  return {
-    current: currentRes.data,
-    previous: previousRes.data,
   };
 }
