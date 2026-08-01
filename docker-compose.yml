@@ -6,10 +6,10 @@ services:
     container_name: job-analytics-dashboard
     environment:
       NODE_ENV: production
-      PORT: "4000"
+      PORT: ${PORT:-4000}
       HOSTNAME: 0.0.0.0
     env_file:
       - .env.local
     ports:
-      - "4000:4000"
+      - "${PORT:-4000}:${PORT:-4000}"
     restart: unless-stopped
