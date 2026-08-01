@@ -1,69 +1,61 @@
 "use client";
 
-import React from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import React, { useState } from "react";
+import { ExpandableTableModal, ExpandTableButton } from "@/components/ExpandableTableModal";
 
 type Props = {
   breakdown: Record<string, number>;
 };
 
 export const LocationChart: React.FC<Props> = ({ breakdown }) => {
-  const entries = Object.entries(breakdown || {});
-  // take top 10 locations by clicks
-  const data = entries
+  const [expanded, setExpanded] = useState(false);
+  const data = Object.entries(breakdown || {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
-    .map(([name, clicks]) => ({ name, clicks }));
+    .map(([name, clicks], index) => ({ rank: index + 1, name, clicks }));
+
+  const renderTable = (inModal = false) => data.length === 0 ? (
+    <div className={`grid place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 ${inModal ? "h-72" : "min-h-0 flex-1"}`}>
+      No location data to show.
+    </div>
+  ) : (
+    <div className={`${inModal ? "max-h-[68vh]" : "min-h-0 flex-1"} min-w-0 overflow-auto rounded-lg border border-slate-200`}>
+      <table className="w-full table-fixed border-collapse text-sm">
+        <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="w-11 px-3 py-3 sm:w-14 sm:px-4" scope="col">#</th>
+            <th className="min-w-0 px-3 py-3 sm:px-4" scope="col">Location</th>
+            <th className="w-20 px-3 py-3 text-right sm:w-28 sm:px-4" scope="col">Clicks</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {data.map((entry) => (
+            <tr className="text-slate-700 hover:bg-slate-50" key={entry.name}>
+              <td className="px-3 py-3 align-top text-slate-400 sm:px-4">{entry.rank}</td>
+              <th className="min-w-0 whitespace-normal break-normal px-3 py-3 text-left font-medium text-slate-950 sm:px-4" scope="row">{entry.name}</th>
+              <td className="px-3 py-3 text-right align-top font-medium tabular-nums sm:px-4">{entry.clicks.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-      <h2 className="text-sm font-semibold text-slate-100 mb-3">
-        Location Performance (Top 10)
-      </h2>
-      {data.length === 0 ? (
-        <p className="text-xs text-slate-400">No data to show.</p>
-      ) : (
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ left: -20 }}>
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 10, fill: "#cbd5f5" }}
-                interval={0}
-                height={60}
-                angle={-30}
-                textAnchor="end"
-              />
-              <YAxis tick={{ fontSize: 10, fill: "#cbd5f5" }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#020617",
-                  borderColor: "#1f2937",
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: "#e5e7eb" }}
-                itemStyle={{ color: "#e5e7eb" }}
-              />
-              {/* 🔹 Bars themselves now WHITE */}
-              <Bar
-                dataKey="clicks"
-                fill="#ffffff"
-                radius={[4, 4, 0, 0]}
-                maxBarSize={40}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+    <section className="flex h-80 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-slate-950">Location Performance</h2>
+          <p className="text-sm text-slate-500">Top 10 locations by clicks</p>
         </div>
-      )}
-    </div>
+        <ExpandTableButton onClick={() => setExpanded(true)} />
+      </div>
+
+      {renderTable()}
+      <ExpandableTableModal open={expanded} onOpenChange={setExpanded} title="Location Performance" description="Top 10 locations by clicks">
+        {renderTable(true)}
+      </ExpandableTableModal>
+    </section>
   );
 };
 

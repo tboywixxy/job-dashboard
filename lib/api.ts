@@ -1,5 +1,7 @@
 // lib/api.ts
+import type { AdminSession } from "@/lib/adminSession";
 const API_BASE_URL = "https://jobs.api.mastaskillz.com";
+const AUTH_BASE_URL = "/api/auth";
 
 /* ------------------------------------------------------------------ */
 /*                               TYPES                                */
@@ -11,6 +13,11 @@ export type TopPerformer = {
   jobTitle: string;
   location: string;
   originalUrl: string;
+
+  // ✅ new optional fields
+  firstClickAt?: string; // ISO
+  lastClickAt?: string;  // ISO
+  timestamps?: string[]; // newest -> oldest (when timestamps=true)
 };
 
 export type SummaryResponse = {
@@ -33,14 +40,16 @@ export type SummaryResponse = {
   };
 };
 
-// Convenience type = just the inner data (what you usually store in state)
 export type SummaryData = SummaryResponse["data"];
 
 export type DailyBreakdown = {
-  date: string; // e.g. "2025-12-08"
+  date: string; // "YYYY-MM-DD"
   totalClicks: number;
   uniqueUrls: number;
+
+  // topShortCodes may include first/last/timestamps when timestamps=true
   topShortCodes: TopPerformer[];
+
   locationBreakdown: Record<string, number>;
   jobTitleBreakdown: Record<string, number>;
 };
@@ -57,18 +66,96 @@ export type WeeklyResponse = {
   };
 };
 
-// Convenience type = inner weekly data only
 export type WeeklyData = WeeklyResponse["data"];
-
-// Monthly has the same shape as Weekly (per API docs/JSON)
 export type MonthlyResponse = WeeklyResponse;
 export type MonthlyData = MonthlyResponse["data"];
-
-// /analytics/range has the same shape as Weekly as well
 export type RangeResponse = WeeklyResponse;
 export type RangeData = RangeResponse["data"];
 
 export type TimeRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
+
+export type CampaignStatus = "active" | "paused" | "ended";
+
+export type CampaignStats = {
+  memberCount: number;
+  totalGranted: number;
+  totalRemaining: number;
+  totalSpent: number;
+};
+
+export type Campaign = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  status: CampaignStatus;
+  budgetCap: number | null;
+  allowedTools: string[];
+  expiresAt: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  stats?: CampaignStats;
+};
+
+export type CampaignMember = {
+  userId: string;
+  granted: number;
+  remaining: number;
+  spent: number;
+  status: "active" | "exhausted" | "revoked" | "expired";
+};
+
+export type CampaignReport = {
+  campaign: Campaign;
+  members: CampaignMember[];
+  stats: CampaignStats;
+};
+
+export type CampaignEnvelope<T> = {
+  code: number;
+  status: "Success" | "Error";
+  message?: string;
+  data: T;
+};
+
+export type CreateCampaignInput = {
+  name: string;
+  description?: string;
+  allowedTools?: string[];
+  budgetCap?: number | null;
+  expiresAt?: string | null;
+};
+
+export type UpdateCampaignInput = Partial<
+  Pick<Campaign, "name" | "description" | "status" | "budgetCap" | "allowedTools" | "expiresAt">
+>;
+
+export type FundMemberInput = {
+  userId?: string;
+  email?: string;
+  amount?: number;
+};
+
+export type UserBalance = {
+  balance: number;
+  currency: string;
+  bonus: {
+    balance: number;
+    items: {
+      bonusId: string;
+      source: string;
+      sourceId: string;
+      remaining: number;
+      expiresAt: string | null;
+      allowedTools: string[] | null;
+    }[];
+  };
+  activeSource: "bonus" | "paid";
+  autoBillWalletWhenBonusLow: boolean;
+};
+
+type UserBalanceResponseData = UserBalance | { balance: UserBalance };
 
 /* ------------------------------------------------------------------ */
 /*                             FETCH HELPERS                          */
@@ -76,155 +163,281 @@ export type TimeRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Request failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error("We could not load that data. Please try again.");
   return res.json() as Promise<T>;
 }
 
-export async function fetchSummary(): Promise<SummaryResponse> {
-  return fetchJson<SummaryResponse>(`${API_BASE_URL}/analytics/summary`);
+async function fetchAuthJson<T>(
+  path: string,
+  opts?: RequestInit & { token?: string }
+): Promise<T> {
+  const headers = new Headers(opts?.headers);
+  if (!headers.has("Content-Type") && opts?.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (opts?.token) {
+    headers.set("Authorization", `Bearer ${opts.token}`);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_BASE_URL}${path}`, {
+      ...opts,
+      headers,
+      credentials: "include",
+    });
+  } catch {
+    throw new Error("Could not reach the campaign service. Please try again.");
+  }
+
+  const body = (await res.json().catch(() => ({}))) as T & {
+    message?: string;
+    code?: number;
+  };
+
+  if (!res.ok || (body.code && body.code >= 400)) {
+    const message =
+      res.status === 404 && path.startsWith("/admin/campaigns")
+        ? "The campaign tools are not available right now. Please try again later."
+        : res.status === 402 || body.code === 402
+          ? "Paid wallet approval is needed before this charge can continue."
+          : body.message || "We could not complete that request. Please try again.";
+    throw Object.assign(new Error(message), {
+      status: res.status,
+      body,
+    });
+  }
+
+  return body as T;
 }
 
-export async function fetchWeekly(): Promise<WeeklyResponse> {
-  return fetchJson<WeeklyResponse>(`${API_BASE_URL}/analytics/weekly`);
+type LoginResponse = Record<string, unknown> & {
+  data?: Record<string, unknown>;
+};
+
+function pickToken(body: LoginResponse) {
+  const data = body.data;
+  const candidates = [
+    body.accessToken,
+    body.access_token,
+    body.token,
+    body.access,
+    body.jwt,
+    data?.accessToken,
+    data?.access_token,
+    data?.token,
+    data?.access,
+  ];
+  return candidates.find((value): value is string => typeof value === "string" && value.length > 0) || null;
+}
+
+function pickString(...values: unknown[]) {
+  return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() || "";
+}
+
+export async function loginAdmin(
+  email: string,
+  password: string,
+  role: "job_seeker" | "employer"
+): Promise<AdminSession> {
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      password,
+      role,
+      accountType: role,
+      userType: role,
+    }),
+  });
+  const response = (await res.json().catch(() => ({}))) as LoginResponse & { message?: string };
+  if (!res.ok) {
+    throw Object.assign(new Error(response.message || `Login failed: ${res.status}`), {
+      status: res.status,
+      body: response,
+    });
+  }
+  const token = pickToken(response);
+  if (!token) throw new Error("Login succeeded, but the server did not return an access token.");
+
+  const data = response.data;
+  const firstName = pickString(data?.firstName, data?.first_name, response.firstName, response.first_name);
+  const lastName = pickString(data?.lastName, data?.last_name, response.lastName, response.last_name);
+  const fullName = pickString(
+    data?.name,
+    data?.fullName,
+    data?.full_name,
+    response.name,
+    response.fullName,
+    response.full_name,
+    [firstName, lastName].filter(Boolean).join(" ")
+  );
+
+  return {
+    token,
+    email,
+    displayName: fullName || email,
+    role,
+  };
+}
+
+function withTimestamps(url: string, timestamps?: boolean) {
+  if (!timestamps) return url;
+  const u = new URL(url);
+  u.searchParams.set("timestamps", "true");
+  return u.toString();
+}
+
+export async function fetchSummary(opts?: { timestamps?: boolean }) {
+  const url = withTimestamps(`${API_BASE_URL}/analytics/summary`, opts?.timestamps);
+  return fetchJson<SummaryResponse>(url);
+}
+
+export async function fetchWeekly(opts?: { date?: string; timestamps?: boolean }) {
+  const u = new URL(`${API_BASE_URL}/analytics/weekly`);
+  if (opts?.date) u.searchParams.set("date", opts.date);
+  if (opts?.timestamps) u.searchParams.set("timestamps", "true");
+  return fetchJson<WeeklyResponse>(u.toString());
 }
 
 export async function fetchMonthly(
   year: number,
-  month: number
-): Promise<MonthlyResponse> {
-  const params = new URLSearchParams({
-    year: String(year),
-    month: String(month), // 1–12
-  });
-  return fetchJson<MonthlyResponse>(
-    `${API_BASE_URL}/analytics/monthly?${params.toString()}`
-  );
+  month: number,
+  opts?: { timestamps?: boolean }
+) {
+  const u = new URL(`${API_BASE_URL}/analytics/monthly`);
+  u.searchParams.set("year", String(year));
+  u.searchParams.set("month", String(month));
+  if (opts?.timestamps) u.searchParams.set("timestamps", "true");
+  return fetchJson<MonthlyResponse>(u.toString());
 }
 
-// 🔹 NEW: generic date range helper (startDate/endDate = "YYYY-MM-DD")
 export async function fetchRange(
   startDate: string,
-  endDate: string
-): Promise<RangeResponse> {
-  const params = new URLSearchParams({
-    startDate,
-    endDate,
-  });
-  return fetchJson<RangeResponse>(
-    `${API_BASE_URL}/analytics/range?${params.toString()}`
+  endDate: string,
+  opts?: { timestamps?: boolean }
+) {
+  const u = new URL(`${API_BASE_URL}/analytics/range`);
+  u.searchParams.set("startDate", startDate);
+  u.searchParams.set("endDate", endDate);
+  if (opts?.timestamps) u.searchParams.set("timestamps", "true");
+  return fetchJson<RangeResponse>(u.toString());
+}
+
+export async function listCampaigns(opts?: {
+  token?: string;
+  status?: CampaignStatus | "all";
+}) {
+  const query = opts?.status && opts.status !== "all" ? `?status=${opts.status}` : "";
+  return fetchAuthJson<CampaignEnvelope<{ campaigns: Campaign[] }>>(
+    `/admin/campaigns${query}`,
+    { token: opts?.token }
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*                        SUMMARY RANGE HELPERS                       */
-/* ------------------------------------------------------------------ */
-
-// Helpers to derive summary numbers for each time range
-// 👀 NOTE: this expects you to pass summary *data* (i.e. response.data), not the full response
-export function getSummaryForRange(
-  summary: SummaryData | null,
-  range: TimeRange
-) {
-  if (!summary) return { clicks: 0, uniqueUrls: 0 };
-
-  const { today, yesterday, thisWeek, thisMonth } = summary;
-
-  switch (range) {
-    case "today":
-      return today;
-    case "yesterday":
-      return yesterday;
-    case "thisWeek":
-      return thisWeek;
-    case "thisMonth":
-      return thisMonth;
-  }
+export async function createCampaign(input: CreateCampaignInput, token?: string) {
+  return fetchAuthJson<CampaignEnvelope<{ campaign: Campaign }>>("/admin/campaigns", {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
 }
 
-/* ------------------------------------------------------------------ */
-/*                     BREAKDOWNS FOR TREND + CHARTS                  */
-/* ------------------------------------------------------------------ */
-
-// For charts & tables, we derive from weekly / monthly data
-// 👀 weekly / monthly here are *data* (response.data), not the full response
-export function getBreakdownsForRange(
-  weekly: WeeklyData | null,
-  monthly: MonthlyData | null,
-  summary: SummaryData | null,
-  range: TimeRange
+export async function updateCampaign(
+  id: string,
+  input: UpdateCampaignInput,
+  token?: string
 ) {
-  // Default empty state
-  let locationBreakdown: Record<string, number> = {};
-  let jobTitleBreakdown: Record<string, number> = {};
-  let topPerformers: TopPerformer[] = [];
-  let trendData: { date: string; totalClicks: number }[] = [];
+  return fetchAuthJson<CampaignEnvelope<{ campaign: Campaign }>>(
+    `/admin/campaigns/${id}`,
+    {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
 
-  const hasWeekly = !!weekly;
-  const hasMonthly = !!monthly;
+export async function getCampaignReport(id: string, token?: string) {
+  return fetchAuthJson<CampaignEnvelope<CampaignReport>>(
+    `/admin/campaigns/${id}/report`,
+    { token }
+  );
+}
 
-  // 🔹 Monthly range: use monthly endpoint if available
-  if (range === "thisMonth" && hasMonthly) {
-    const m = monthly!;
+export async function bulkFundCampaignMembers(
+  id: string,
+  input: { members: FundMemberInput[]; amount?: number; notify?: boolean },
+  token?: string
+) {
+  return fetchAuthJson<
+    CampaignEnvelope<{
+      funded: { userId: string; amount: number }[];
+      unmatched: { userId?: string; email?: string; reason: string }[];
+    }>
+  >(`/admin/campaigns/${id}/members`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
+}
 
-    trendData = m.dailyBreakdown.map((d) => ({
-      date: d.date,
-      totalClicks: d.totalClicks,
-    }));
+export async function revokeCampaignMembers(
+  id: string,
+  userIds: string[],
+  token?: string
+) {
+  return fetchAuthJson<
+    CampaignEnvelope<{
+      revoked: { userId: string; reclaimed: number }[];
+      notFound: string[];
+    }>
+  >(`/admin/campaigns/${id}/revoke`, {
+    method: "POST",
+    token,
+    body: JSON.stringify({ userIds }),
+  });
+}
 
-    locationBreakdown = m.locationBreakdown;
-    jobTitleBreakdown = m.jobTitleBreakdown;
-    topPerformers = m.topPerformers;
+function normalizeUserBalance(data: UserBalanceResponseData): UserBalance {
+  if ("currency" in data) {
+    return data;
   }
-  // 🔹 Default / weekly-based (today, yesterday, thisWeek)
-  else if (hasWeekly) {
-    const w = weekly!;
 
-    trendData = w.dailyBreakdown.map((d) => ({
-      date: d.date,
-      totalClicks: d.totalClicks,
-    }));
-
-    locationBreakdown = w.locationBreakdown;
-    jobTitleBreakdown = w.jobTitleBreakdown;
-    topPerformers = w.topPerformers;
-
-    // Today / Yesterday → drill into daily breakdown
-    if (range === "today" || range === "yesterday") {
-      const today = new Date();
-      const yesterday = new Date();
-      yesterday.setDate(today.getDate() - 1);
-
-      const targetDate =
-        range === "today"
-          ? today.toISOString().slice(0, 10)
-          : yesterday.toISOString().slice(0, 10);
-
-      const day = w.dailyBreakdown.find((d) => d.date === targetDate);
-
-      if (day) {
-        locationBreakdown = day.locationBreakdown;
-        jobTitleBreakdown = day.jobTitleBreakdown;
-        topPerformers = day.topShortCodes;
-      }
-    }
-  }
-
-  // Prefer summary's dedicated topPerformers if present
-  if (summary) {
-    if (range === "thisWeek" && summary.thisWeek.topPerformers) {
-      topPerformers = summary.thisWeek.topPerformers;
-    }
-    if (range === "thisMonth" && summary.thisMonth.topPerformers) {
-      topPerformers = summary.thisMonth.topPerformers;
-    }
+  if (typeof data.balance === "object" && data.balance !== null) {
+    return data.balance;
   }
 
   return {
-    locationBreakdown,
-    jobTitleBreakdown,
-    topPerformers,
-    trendData,
+    balance: 0,
+    currency: "NGN",
+    bonus: { balance: 0, items: [] },
+    activeSource: "paid",
+    autoBillWalletWhenBonusLow: false,
   };
+}
+
+export async function getUserBalance(token?: string): Promise<CampaignEnvelope<UserBalance>> {
+  const response = await fetchAuthJson<CampaignEnvelope<UserBalanceResponseData>>("/user/balance", {
+    token,
+  });
+
+  return {
+    ...response,
+    data: normalizeUserBalance(response.data),
+  };
+}
+
+export async function setBillingConsent(
+  autoBillWalletWhenBonusLow: boolean,
+  token?: string
+) {
+  return fetchAuthJson<
+    CampaignEnvelope<{ autoBillWalletWhenBonusLow: boolean }>
+  >("/user/billing-consent", {
+    method: "PATCH",
+    token,
+    body: JSON.stringify({ autoBillWalletWhenBonusLow }),
+  });
 }

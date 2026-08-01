@@ -1,6 +1,10 @@
+// components/TopJobsTable.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { ArrowDownUp, ExternalLink, Info, Search } from "lucide-react";
+import JobDetailsModal from "@/components/JobDetailsModal";
+import { ExpandableTableModal, ExpandTableButton } from "@/components/ExpandableTableModal";
 
 type JobRow = {
   shortCode: string;
@@ -8,173 +12,61 @@ type JobRow = {
   location: string;
   clicks: number;
   originalUrl: string;
+  firstClickAt?: string;
+  lastClickAt?: string;
+  timestamps?: string[];
 };
 
 type TopJobsTableProps = {
   jobs: JobRow[];
 };
 
-// 🔹 Export ALL jobs (not just visible table) to CSV with full details
-const exportJobsToCSV = (jobs: JobRow[]) => {
-  if (!jobs || jobs.length === 0) return;
-
-  const headers = [
-    "Job Title",
-    "Location",
-    "Clicks",
-    "Shortcode",
-    "Original URL",
-  ];
-
-  const rows = jobs.map((j) => [
-    j.jobTitle,
-    j.location,
-    j.clicks.toString(),
-    j.shortCode,
-    j.originalUrl,
-  ]);
-
-  const csvLines = [
-    headers.join(","),
-    // escape commas / quotes in fields
-    ...rows.map((cols) =>
-      cols
-        .map((val) => {
-          const v = String(val ?? "");
-          if (v.includes(",") || v.includes('"') || v.includes("\n")) {
-            return `"${v.replace(/"/g, '""')}"`;
-          }
-          return v;
-        })
-        .join(",")
-    ),
-  ];
-
-  const csvContent = csvLines.join("\n");
-
-  const blob = new Blob([csvContent], {
-    type: "text/csv;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "job_analytics_export.csv";
-  a.click();
-  URL.revokeObjectURL(url);
+const fmtLocal = (ts?: string) => {
+  if (!ts) return "-";
+  try {
+    return new Date(ts).toLocaleString("en-NG", { timeZone: "Africa/Lagos" });
+  } catch {
+    return ts;
+  }
 };
-
-// 🔹 Simple PDF-like export using browser print (includes all job details)
-const exportJobsToPDF = (jobs: JobRow[]) => {
-  if (!jobs || jobs.length === 0) return;
-
-  const win = window.open("", "_blank");
-  if (!win) return;
-
-  win.document.write(`
-    <html>
-      <head>
-        <title>Job Analytics Export</title>
-        <style>
-          body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            padding: 16px;
-            color: #0f172a;
-          }
-          h1 { font-size: 20px; margin-bottom: 12px; }
-          h2 { font-size: 16px; margin-top: 20px; margin-bottom: 6px; }
-          p { font-size: 13px; margin: 2px 0; }
-          .job-card { border-bottom: 1px solid #cbd5f5; padding: 8px 0; }
-        </style>
-      </head>
-      <body>
-        <h1>Job Analytics Export</h1>
-        <p>Total jobs: ${jobs.length}</p>
-        <hr />
-        ${jobs
-          .map(
-            (j, idx) => `
-            <div class="job-card">
-              <h2>${idx + 1}. ${j.jobTitle}</h2>
-              <p><b>Location:</b> ${j.location}</p>
-              <p><b>Clicks:</b> ${j.clicks}</p>
-              <p><b>Shortcode:</b> ${j.shortCode}</p>
-              <p><b>Original URL:</b> ${j.originalUrl}</p>
-            </div>
-          `
-          )
-          .join("")}
-      </body>
-    </html>
-  `);
-
-  win.document.close();
-  win.focus();
-  win.print();
-};
-
-type SortKey = "clicks" | "location";
-type SortDirection = "asc" | "desc";
 
 export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("clicks");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [sortKey, setSortKey] = useState<"clicks" | "location">("clicks");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<JobRow | null>(null);
 
-  // 🔁 handle sort changes
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      // toggle current direction
-      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-    } else {
+  const handleSort = (key: "clicks" | "location") => {
+    if (sortKey === key) setSortDirection((p) => (p === "asc" ? "desc" : "asc"));
+    else {
       setSortKey(key);
-      // default: clicks → desc, location → asc
       setSortDirection(key === "clicks" ? "desc" : "asc");
     }
   };
 
-  const renderSortIndicator = (key: SortKey) => {
-    if (sortKey !== key) return null;
-    return (
-      <span className="ml-1 text-[10px] text-slate-400">
-        {sortDirection === "asc" ? "▲" : "▼"}
-      </span>
-    );
-  };
-
-  // 🔎 Filter by job title or location
   const filteredJobs = useMemo(() => {
     if (!search.trim()) return jobs;
-
     const lower = search.toLowerCase();
     return jobs.filter(
       (j) =>
         j.jobTitle.toLowerCase().includes(lower) ||
-        j.location.toLowerCase().includes(lower)
+        j.location.toLowerCase().includes(lower) ||
+        j.shortCode.toLowerCase().includes(lower)
     );
   }, [jobs, search]);
 
-  // ⬆️⬇️ Sort by selected key (clicks or location)
   const sortedJobs = useMemo(() => {
     const copy = [...filteredJobs];
-
     copy.sort((a, b) => {
-      let aVal: number | string;
-      let bVal: number | string;
-
-      if (sortKey === "clicks") {
-        aVal = a.clicks;
-        bVal = b.clicks;
-      } else {
-        aVal = a.location.toLowerCase();
-        bVal = b.location.toLowerCase();
-      }
+      const aVal = sortKey === "clicks" ? a.clicks : (a.location || "").toLowerCase();
+      const bVal = sortKey === "clicks" ? b.clicks : (b.location || "").toLowerCase();
 
       if (aVal < bVal) return sortDirection === "asc" ? -1 : 1;
       if (aVal > bVal) return sortDirection === "asc" ? 1 : -1;
       return 0;
     });
-
     return copy;
   }, [filteredJobs, sortKey, sortDirection]);
 
@@ -183,124 +75,181 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
+  const handleDetails = (job: JobRow) => {
+    setSelected(job);
+    setOpen(true);
+  };
+
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+    <div className="w-full min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">
+          <h2 className="text-base font-semibold text-slate-950">
             Top Performing Jobs
           </h2>
-          <p className="text-xs text-slate-400">
-            Sorted by clicks or location. Use search to filter.
+          <p className="text-sm text-slate-500">
+            Search, sort, and inspect timestamp analytics.
           </p>
         </div>
 
-        {/* 🔍 Search + Export */}
-        <div className="flex flex-1 sm:flex-none gap-2 items-center justify-end">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by title or location..."
-            className="w-full sm:w-64 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-
-          {/* 📤 Export Buttons → ALL jobs, not just filtered */}
-          <button
-            onClick={() => exportJobsToCSV(jobs)}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 text-[11px] text-slate-200 border border-slate-700 hover:bg-slate-700"
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={() => exportJobsToPDF(jobs)}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 text-[11px] text-slate-200 border border-slate-700 hover:bg-slate-700"
-          >
-            Export PDF
-          </button>
+        <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+          <div className="relative w-full lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search title, location, shortcode"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
+            />
+          </div>
+          <ExpandTableButton onClick={() => setExpanded(true)} />
         </div>
       </div>
 
-      {/* 🔁 Scrollable table container (fixed height) */}
-      <div className="overflow-x-auto rounded-lg border border-slate-800 max-h-72 overflow-y-auto">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-900/80 sticky top-0 z-10">
-            <tr>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-400">
-                Job Title
-              </th>
-              <th
-                className="px-3 py-2 text-left text-xs font-semibold text-slate-400 cursor-pointer select-none"
-                onClick={() => handleSort("location")}
-                title="Click to sort by location"
-              >
-                Location
-                {renderSortIndicator("location")}
-              </th>
-              <th
-                className="px-3 py-2 text-right text-xs font-semibold text-slate-400 cursor-pointer select-none"
-                onClick={() => handleSort("clicks")}
-                title="Click to sort by clicks"
-              >
-                Clicks
-                {renderSortIndicator("clicks")}
-              </th>
-              <th className="px-3 py-2 text-right text-xs font-semibold text-slate-400">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800 bg-slate-950/60">
-            {sortedJobs.length === 0 ? (
+      <div className="overflow-hidden rounded-lg border border-slate-200">
+        <div className="max-h-96 overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-50">
               <tr>
-                <td
-                  colSpan={4}
-                  className="px-3 py-4 text-center text-xs text-slate-500"
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Job Title
+                </th>
+
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  onClick={() => handleSort("location")}
                 >
-                  No jobs found for this search.
-                </td>
+                  <button className="inline-flex items-center gap-1" type="button">
+                    Location <ArrowDownUp className="h-3.5 w-3.5" />
+                  </button>
+                </th>
+
+                <th
+                  className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  onClick={() => handleSort("clicks")}
+                >
+                  <button className="ml-auto inline-flex items-center gap-1" type="button">
+                    Clicks <ArrowDownUp className="h-3.5 w-3.5" />
+                  </button>
+                </th>
+
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  First click
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Last click
+                </th>
+
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Actions
+                </th>
               </tr>
-            ) : (
-              sortedJobs.map((job) => (
-                <tr key={job.shortCode} className="hover:bg-slate-900/60">
-                  <td className="px-3 py-2 align-top">
-                    <div className="flex flex-col">
-                      <span className="text-slate-100 text-sm">
-                        {job.jobTitle}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        Shortcode: {job.shortCode}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 align-top text-slate-200">
-                    {job.location || "—"}
-                  </td>
-                  <td className="px-3 py-2 align-top text-right text-slate-100">
-                    {job.clicks}
-                  </td>
-                  <td className="px-3 py-2 align-top text-right">
-                    <button
-                      onClick={() => handleViewJob(job.originalUrl)}
-                      className="inline-flex items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800"
-                    >
-                      View
-                    </button>
+            </thead>
+
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {sortedJobs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                    No jobs found for this search.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                sortedJobs.map((job) => (
+                  <tr key={job.shortCode} className="transition hover:bg-slate-50">
+                    <td className="px-4 py-3 align-top">
+                      <div className="min-w-56">
+                        <span className="font-medium text-slate-950">{job.jobTitle}</span>
+                        <span className="mt-1 block text-xs text-slate-400">
+                          {job.shortCode}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-slate-600">
+                      {job.location || "-"}
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-right">
+                      <span className="inline-flex rounded-full bg-[#48C05C]/10 px-2.5 py-1 text-xs font-semibold text-[#2f8f42]">
+                        {job.clicks.toLocaleString()}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-xs text-slate-500">
+                      {fmtLocal(job.firstClickAt)}
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-xs text-slate-500">
+                      {fmtLocal(job.lastClickAt)}
+                    </td>
+
+                    <td className="px-4 py-3 align-top text-right">
+                      <div className="inline-flex gap-2">
+                        <button
+                          onClick={() => handleViewJob(job.originalUrl)}
+                          className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-[#48C05C]/40 hover:text-[#48C05C]"
+                          title="Open job"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDetails(job)}
+                          className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-[#48C05C]/40 hover:text-[#48C05C]"
+                          title="View details"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <p className="mt-2 text-[11px] text-slate-500">
-        Tip: Export buttons include{" "}
-        <span className="font-semibold text-slate-300">
-          all available jobs with full details
-        </span>
-        , not just the ones currently visible in the table.
-      </p>
+      <ExpandableTableModal
+        open={expanded}
+        onOpenChange={setExpanded}
+        title="Top Performing Jobs"
+        description={`${sortedJobs.length.toLocaleString()} matching jobs. Search, sort, and inspect timestamp analytics.`}
+      >
+        <div className="relative mb-4 w-full sm:max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search title, location, shortcode" className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10" />
+        </div>
+        <div className="max-h-[68vh] overflow-auto rounded-lg border border-slate-200">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Job Title</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><button type="button" onClick={() => handleSort("location")} className="inline-flex items-center gap-1">Location <ArrowDownUp className="h-3.5 w-3.5" /></button></th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500"><button type="button" onClick={() => handleSort("clicks")} className="ml-auto inline-flex items-center gap-1">Clicks <ArrowDownUp className="h-3.5 w-3.5" /></button></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">First click</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Last click</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {sortedJobs.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">No jobs found for this search.</td></tr>
+              ) : sortedJobs.map((job) => (
+                <tr key={job.shortCode} className="hover:bg-slate-50">
+                  <td className="px-4 py-3"><span className="font-medium text-slate-950">{job.jobTitle}</span><span className="mt-1 block text-xs text-slate-400">{job.shortCode}</span></td>
+                  <td className="px-4 py-3 text-slate-600">{job.location || "-"}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-[#2f8f42]">{job.clicks.toLocaleString()}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{fmtLocal(job.firstClickAt)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{fmtLocal(job.lastClickAt)}</td>
+                  <td className="px-4 py-3 text-right"><div className="inline-flex gap-2"><button type="button" onClick={() => handleViewJob(job.originalUrl)} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200" title="Open job"><ExternalLink className="h-4 w-4" /></button><button type="button" onClick={() => handleDetails(job)} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200" title="View details"><Info className="h-4 w-4" /></button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </ExpandableTableModal>
+      <JobDetailsModal open={open} job={selected} onClose={() => setOpen(false)} />
     </div>
   );
 };

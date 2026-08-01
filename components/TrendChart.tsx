@@ -1,17 +1,8 @@
 // components/TrendChart.tsx
 "use client";
 
-import React from "react";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-} from "recharts";
+import React, { useState } from "react";
+import { ExpandableTableModal, ExpandTableButton } from "@/components/ExpandableTableModal";
 
 type SelectedRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
 
@@ -51,9 +42,9 @@ const formatSubtitle = (range: SelectedRange, totalClicks: number) => {
     case "yesterday":
       return `${clicksText} for yesterday`;
     case "thisWeek":
-      return `${clicksText} in this week`;
+      return `${clicksText} this week`;
     case "thisMonth":
-      return `${clicksText} in this month`;
+      return `${clicksText} this month`;
     default:
       return clicksText;
   }
@@ -64,87 +55,52 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   selectedRange,
   totalClicks,
 }) => {
+  const [expanded, setExpanded] = useState(false);
   const titleLabel = formatLabel(selectedRange);
   const subtitle = formatSubtitle(selectedRange, totalClicks);
 
-  const tooltipFormatter = (value: any, name: any) => {
-    if (name === "totalClicks") return [`${value} clicks`, "Total Clicks"];
-    if (name === "uniqueUrls") return [`${value} URLs`, "Unique URLs"];
-    return [value, name];
-  };
-
-  const tooltipLabelFormatter = (label: string) => `Date: ${label}`;
+  const renderTable = (inModal = false) => data.length === 0 ? (
+    <div className={`grid place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 ${inModal ? "h-72" : "h-56"}`}>
+      No engagement data to show.
+    </div>
+  ) : (
+    <div className={`${inModal ? "max-h-[68vh]" : "max-h-56"} overflow-auto rounded-lg border border-slate-200`}>
+      <table className="w-full border-collapse text-sm">
+        <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-4 py-3" scope="col">Date</th>
+            <th className="px-4 py-3 text-right" scope="col">Total clicks</th>
+            <th className="px-4 py-3 text-right" scope="col">Unique URLs</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {data.map((entry, index) => (
+            <tr className="text-slate-700 hover:bg-slate-50" key={`${entry.date}-${index}`}>
+              <th className="whitespace-nowrap px-4 py-3 text-left font-medium text-slate-950" scope="row">{entry.date}</th>
+              <td className="px-4 py-3 text-right tabular-nums">{entry.totalClicks.toLocaleString()}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{entry.uniqueUrls.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
-    <div className="h-72 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-      <div className="flex items-center justify-between mb-3">
+    <section className="h-80 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">
-            Engagement Trend • {titleLabel}
-          </h2>
-          <p className="text-xs text-slate-400">{subtitle}</p>
+          <h2 className="text-base font-semibold text-slate-950">Engagement Activity - {titleLabel}</h2>
+          <p className="text-sm text-slate-500">{subtitle}</p>
         </div>
+        <ExpandTableButton onClick={() => setExpanded(true)} />
       </div>
 
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-
-          <XAxis
-            dataKey="date"
-            tick={{ fontSize: 11, fill: "#9ca3af" }}
-            tickMargin={8}
-          />
-          <YAxis
-            tick={{ fontSize: 11, fill: "#9ca3af" }}
-            tickMargin={8}
-            width={60}
-          />
-
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "#020617",
-              border: "1px solid #1f2937",
-              borderRadius: 8,
-              fontSize: 12,
-            }}
-            labelStyle={{ color: "#e5e7eb", marginBottom: 4 }}
-            formatter={tooltipFormatter}
-            labelFormatter={tooltipLabelFormatter}
-          />
-
-          <Legend
-            verticalAlign="top"
-            align="right"
-            wrapperStyle={{ fontSize: 11, color: "#e5e7eb", paddingBottom: 8 }}
-          />
-
-          {/* Total Clicks area */}
-          <Area
-            type="monotone"
-            dataKey="totalClicks"
-            name="Total Clicks"
-            stroke="#6366f1"
-            fill="#6366f1"
-            fillOpacity={0.15}
-            strokeWidth={2}
-            activeDot={{ r: 5 }}
-          />
-
-          {/* Unique URLs area */}
-          <Area
-            type="monotone"
-            dataKey="uniqueUrls"
-            name="Unique URLs"
-            stroke="#22c55e"
-            fill="#22c55e"
-            fillOpacity={0.12}
-            strokeWidth={2}
-            activeDot={{ r: 5 }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+      {renderTable()}
+      <ExpandableTableModal open={expanded} onOpenChange={setExpanded} title={`Engagement Activity - ${titleLabel}`} description={subtitle}>
+        {renderTable(true)}
+      </ExpandableTableModal>
+    </section>
   );
 };
 

@@ -1,6 +1,14 @@
 // components/SummaryCards.tsx
 "use client";
 
+import {
+  CalendarClock,
+  CalendarDays,
+  MousePointerClick,
+  TrendingUp,
+  type LucideIcon,
+} from "lucide-react";
+
 type SelectedRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
 
 type SummaryCardsProps = {
@@ -14,11 +22,11 @@ type SummaryCardsProps = {
   onSelectRange: (range: SelectedRange) => void;
 };
 
-const cardOrder: { key: SelectedRange; label: string }[] = [
-  { key: "today", label: "Today" },
-  { key: "yesterday", label: "Yesterday" },
-  { key: "thisWeek", label: "This Week" },
-  { key: "thisMonth", label: "This Month" },
+const cardOrder: { key: SelectedRange; label: string; icon: LucideIcon }[] = [
+  { key: "today", label: "Today", icon: MousePointerClick },
+  { key: "yesterday", label: "Yesterday", icon: CalendarClock },
+  { key: "thisWeek", label: "This Week", icon: TrendingUp },
+  { key: "thisMonth", label: "This Month", icon: CalendarDays },
 ];
 
 export const SummaryCards: React.FC<SummaryCardsProps> = ({
@@ -27,8 +35,8 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
   onSelectRange,
 }) => {
   return (
-    <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {cardOrder.map(({ key, label }) => {
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {cardOrder.map(({ key, label, icon: Icon }) => {
         const stats = summary[key];
         const isActive = selectedRange === key;
 
@@ -37,30 +45,31 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
             key={key}
             type="button"
             onClick={() => onSelectRange(key)}
-            className={`rounded-xl border p-4 text-left transition ${
+            className={`group rounded-xl border bg-white p-4 text-left shadow-sm transition ${
               isActive
-                ? "border-indigo-500/80 bg-indigo-950/60 shadow-[0_0_0_1px_rgba(129,140,248,0.3)]"
-                : "border-slate-800 bg-slate-900/70 hover:border-slate-700 hover:bg-slate-900"
+                ? "border-[#48C05C] ring-4 ring-[#48C05C]/10"
+                : "border-slate-200 hover:border-[#48C05C]/40 hover:shadow-md"
             }`}
           >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 {label}
               </span>
-              {isActive && (
-                <span className="inline-flex h-2 w-2 items-center justify-center">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                </span>
-              )}
+              <span
+                className={`grid h-9 w-9 place-items-center rounded-lg ${
+                  isActive
+                    ? "bg-[#48C05C] text-white"
+                    : "bg-slate-100 text-slate-500 group-hover:bg-[#48C05C]/10 group-hover:text-[#48C05C]"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
             </div>
 
-            <p className="text-2xl font-semibold text-slate-50">
-              {stats.clicks.toLocaleString()}{" "}
-              <span className="text-xs font-normal text-slate-400">
-                clicks
-              </span>
+            <p className="text-3xl font-semibold tracking-tight text-slate-950">
+              {stats.clicks.toLocaleString()}
             </p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-sm text-slate-500">
               {stats.uniqueUrls.toLocaleString()} unique job URLs
             </p>
           </button>

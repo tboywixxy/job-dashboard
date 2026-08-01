@@ -26,7 +26,7 @@ export const TimeRangeTabs: React.FC<Props> = ({ value, onChange }) => {
           className={clsx(
             "px-4 py-1.5 text-sm font-medium rounded-lg transition",
             value === r.id
-              ? "bg-emerald-500 text-slate-950 shadow"
+              ? "bg-[#48C05C] text-white shadow"
               : "text-slate-300 hover:bg-slate-800"
           )}
         >

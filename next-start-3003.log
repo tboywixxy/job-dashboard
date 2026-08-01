@@ -1,0 +1,10 @@
+
+> job-analytics-dashboard@0.1.0 start
+> next start -p 3003
+
+   ▲ Next.js 16.0.10
+   - Local:         http://localhost:3003
+   - Network:       http://192.168.56.1:3003
+
+ ✓ Starting...
+ ✓ Ready in 3.3s

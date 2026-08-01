@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f7fb;
+  --foreground: #0f172a;
+  --dashboard-font: "Aptos", "Segoe UI", "Inter", Arial, Helvetica, sans-serif;
 }
 
 @theme inline {
@@ -12,16 +13,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-  @apply bg-slate-950 text-slate-100;
+  font-family: var(--dashboard-font);
+  @apply bg-[#f5f7fb] text-slate-950 antialiased;
+}
+
+* {
+  scrollbar-color: #cbd5e1 transparent;
 }
