@@ -9,7 +9,8 @@ type RouteContext = {
 
 async function proxyRequest(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
-  const upstreamUrl = new URL(`${AUTH_UPSTREAM}/${path.join("/")}`);
+  const upstreamBase = AUTH_UPSTREAM.replace(/\/+$/, "");
+  const upstreamUrl = new URL(`${upstreamBase}/${path.join("/")}`);
   upstreamUrl.search = request.nextUrl.search;
 
   const headers = new Headers();

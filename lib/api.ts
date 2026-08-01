@@ -75,6 +75,7 @@ export type RangeData = RangeResponse["data"];
 export type TimeRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
 
 export type CampaignStatus = "active" | "paused" | "ended";
+export type CampaignEffectiveStatus = CampaignStatus | "expired";
 
 export type CampaignStats = {
   memberCount: number;
@@ -89,21 +90,46 @@ export type Campaign = {
   name: string;
   description: string;
   status: CampaignStatus;
+  effectiveStatus?: CampaignEffectiveStatus;
   budgetCap: number | null;
   allowedTools: string[];
   expiresAt: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
   stats?: CampaignStats;
+};
+
+export type Pagination = {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+};
+
+export type UserSummary = {
+  id?: string;
+  userId?: string;
+  name?: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
 };
 
 export type CampaignMember = {
   userId: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  user?: UserSummary;
   granted: number;
   remaining: number;
   spent: number;
   status: "active" | "exhausted" | "revoked" | "expired";
+  allowedTools?: string[];
+  expiresAt?: string | null;
+  grantedAt?: string;
 };
 
 export type CampaignReport = {
@@ -149,10 +175,26 @@ export type UserBalance = {
       remaining: number;
       expiresAt: string | null;
       allowedTools: string[] | null;
+      campaignStatus?: CampaignEffectiveStatus;
     }[];
   };
   activeSource: "bonus" | "paid";
   autoBillWalletWhenBonusLow: boolean;
+};
+
+export type WalletTransaction = {
+  id: string;
+  userId?: string;
+  user?: UserSummary;
+  type: "credit" | "debit" | string;
+  status: "completed" | "failed" | string;
+  amount: number;
+  reference?: string | null;
+  description?: string | null;
+  balanceBefore?: number;
+  balanceAfter?: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
 };
 
 type UserBalanceResponseData = UserBalance | { balance: UserBalance };
@@ -197,11 +239,9 @@ async function fetchAuthJson<T>(
 
   if (!res.ok || (body.code && body.code >= 400)) {
     const message =
-      res.status === 404 && path.startsWith("/admin/campaigns")
-        ? "The campaign tools are not available right now. Please try again later."
-        : res.status === 402 || body.code === 402
-          ? "Paid wallet approval is needed before this charge can continue."
-          : body.message || "We could not complete that request. Please try again.";
+      res.status === 402 || body.code === 402
+        ? "Paid wallet approval is needed before this charge can continue."
+        : body.message || `Request failed: ${res.status}`;
     throw Object.assign(new Error(message), {
       status: res.status,
       body,
@@ -327,10 +367,24 @@ export async function fetchRange(
 
 export async function listCampaigns(opts?: {
   token?: string;
-  status?: CampaignStatus | "all";
+  status?: CampaignEffectiveStatus | "all";
+  name?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  includeDeleted?: boolean;
+  page?: number;
+  limit?: number;
 }) {
-  const query = opts?.status && opts.status !== "all" ? `?status=${opts.status}` : "";
-  return fetchAuthJson<CampaignEnvelope<{ campaigns: Campaign[] }>>(
+  const params = new URLSearchParams();
+  if (opts?.status && opts.status !== "all") params.set("status", opts.status);
+  if (opts?.name) params.set("name", opts.name);
+  if (opts?.createdFrom) params.set("createdFrom", opts.createdFrom);
+  if (opts?.createdTo) params.set("createdTo", opts.createdTo);
+  if (opts?.includeDeleted) params.set("includeDeleted", "true");
+  if (opts?.page) params.set("page", String(opts.page));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetchAuthJson<CampaignEnvelope<{ campaigns: Campaign[]; pagination: Pagination }>>(
     `/admin/campaigns${query}`,
     { token: opts?.token }
   );
@@ -363,6 +417,62 @@ export async function getCampaignReport(id: string, token?: string) {
   return fetchAuthJson<CampaignEnvelope<CampaignReport>>(
     `/admin/campaigns/${id}/report`,
     { token }
+  );
+}
+
+export async function listCampaignMembers(opts: {
+  id: string;
+  token?: string;
+  status?: CampaignMember["status"] | "all";
+  page?: number;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (opts.status && opts.status !== "all") params.set("status", opts.status);
+  if (opts.page) params.set("page", String(opts.page));
+  if (opts.limit) params.set("limit", String(opts.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetchAuthJson<CampaignEnvelope<{ members: CampaignMember[]; pagination: Pagination }>>(
+    `/admin/campaigns/${opts.id}/members${query}`,
+    { token: opts.token }
+  );
+}
+
+export async function listAdminTransactions(opts?: {
+  token?: string;
+  userId?: string;
+  type?: "credit" | "debit" | "all";
+  status?: "completed" | "failed" | "all";
+  reference?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  page?: number;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (opts?.userId) params.set("userId", opts.userId);
+  if (opts?.type && opts.type !== "all") params.set("type", opts.type);
+  if (opts?.status && opts.status !== "all") params.set("status", opts.status);
+  if (opts?.reference) params.set("reference", opts.reference);
+  if (opts?.createdFrom) params.set("createdFrom", opts.createdFrom);
+  if (opts?.createdTo) params.set("createdTo", opts.createdTo);
+  if (opts?.page) params.set("page", String(opts.page));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetchAuthJson<CampaignEnvelope<{ transactions: WalletTransaction[]; pagination: Pagination }>>(
+    `/admin/transactions${query}`,
+    { token: opts?.token }
+  );
+}
+
+export async function deleteCampaign(id: string, opts?: { token?: string; cascadeRevoke?: boolean }) {
+  const query = opts?.cascadeRevoke ? "?cascadeRevoke=true" : "";
+  return fetchAuthJson<CampaignEnvelope<{ campaign?: Campaign; reclaimed?: number }>>(
+    `/admin/campaigns/${id}${query}`,
+    {
+      method: "DELETE",
+      token: opts?.token,
+    }
   );
 }
 

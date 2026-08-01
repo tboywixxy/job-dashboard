@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Eye, EyeOff, Loader2, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ToastNotice } from "@/components/ToastNotice";
 import { loginAdmin, listCampaigns } from "@/lib/api";
 import type { AdminSession } from "@/lib/adminSession";
 
@@ -15,6 +16,12 @@ export function AdminLoginForm({ onAuthenticated }: Props) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!error) return;
+    const timeout = window.setTimeout(() => setError(""), 7000);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -38,6 +45,8 @@ export function AdminLoginForm({ onAuthenticated }: Props) {
 
   return (
     <section className="grid min-h-[620px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[1.05fr_0.95fr]">
+      {error && <ToastNotice tone="error" text={error} onClose={() => setError("")} />}
+
       <div className="hidden flex-col justify-center bg-emerald-950 p-12 text-white lg:flex">
         <div className="mb-7 grid h-12 w-12 place-items-center rounded-xl bg-white/10">
           <ShieldCheck className="h-6 w-6 text-emerald-300" />
@@ -104,8 +113,6 @@ export function AdminLoginForm({ onAuthenticated }: Props) {
                 </button>
               </div>
             </div>
-
-            {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
             <button
               type="submit"
