@@ -1,15 +1,10 @@
 services:
   job-analytics-dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: job-analytics-dashboard
-    environment:
-      NODE_ENV: production
-      PORT: ${PORT:-4000}
-      HOSTNAME: 0.0.0.0
     env_file:
       - .env.local
+    # Bound to loopback so the app is only reachable through nginx/TLS.
     ports:
-      - "${PORT:-4000}:${PORT:-4000}"
+      - "127.0.0.1:4000:4000"
     restart: unless-stopped
