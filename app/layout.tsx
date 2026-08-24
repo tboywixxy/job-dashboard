@@ -13,8 +13,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-[#f5f7fb] text-slate-950">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var theme = localStorage.getItem("dashboard-theme");
+                if (!theme) theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+                document.documentElement.classList.toggle("dark", theme === "dark");
+              } catch {}
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-screen">
         {children}
       </body>
     </html>

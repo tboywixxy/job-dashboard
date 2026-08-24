@@ -12,8 +12,10 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  Moon,
   RefreshCw,
   Settings,
+  Sun,
   UserCircle,
 } from "lucide-react";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
@@ -39,6 +41,7 @@ import {
   storeAdminSession,
   type AdminSession,
 } from "@/lib/adminSession";
+import { applyTheme, getInitialTheme, type ThemeMode } from "@/lib/theme";
 
 type SelectedRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
 type ActiveView = "dashboard" | "campaigns" | "reports" | "locations" | "timeline" | "settings";
@@ -71,6 +74,7 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [includeTimestamps, setIncludeTimestamps] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
 
   const [rangeData, setRangeData] = useState<RangeData | null>(null);
   const [rangeLoading, setRangeLoading] = useState(false);
@@ -114,6 +118,10 @@ export default function Page() {
     if (savedSession) setAdminSession(savedSession);
     setAuthReady(true);
   }, []);
+
+  useEffect(() => {
+    applyTheme(themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     if (!adminSession) return;
@@ -365,12 +373,25 @@ export default function Page() {
       </nav>
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 xl:px-8 2xl:px-10">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            {pageTitle}
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            {pageDescription}
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                {pageTitle}
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                {pageDescription}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
+              className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+              aria-label="Toggle theme"
+            >
+              {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {themeMode === "dark" ? "Light" : "Dark"}
+            </button>
+          </div>
 
           {adminSession && activeView === "dashboard" && (
             <label className="mt-4 flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 select-none">
@@ -388,7 +409,7 @@ export default function Page() {
                   type="date"
                   value={startDate}
                   onChange={(event) => setStartDate(event.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none transition focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+                  className="custom-date text-sm font-normal"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
@@ -397,7 +418,7 @@ export default function Page() {
                   type="date"
                   value={endDate}
                   onChange={(event) => setEndDate(event.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none transition focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+                  className="custom-date text-sm font-normal"
                 />
               </label>
             </div>

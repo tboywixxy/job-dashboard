@@ -75,13 +75,15 @@ export type RangeData = RangeResponse["data"];
 export type TimeRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
 
 export type CampaignStatus = "active" | "paused" | "ended";
-export type CampaignEffectiveStatus = CampaignStatus | "expired";
+export type CampaignEffectiveStatus = CampaignStatus | "expired" | "deleted";
 
 export type CampaignStats = {
   memberCount: number;
   totalGranted: number;
   totalRemaining: number;
   totalSpent: number;
+  spendableRemaining?: number;
+  budgetRemaining?: number | null;
 };
 
 export type Campaign = {
@@ -108,6 +110,13 @@ export type Pagination = {
   totalPages: number;
 };
 
+export type CampaignService = {
+  id: string;
+  label: string;
+  description?: string;
+  live: boolean;
+};
+
 export type UserSummary = {
   id?: string;
   userId?: string;
@@ -127,6 +136,7 @@ export type CampaignMember = {
   remaining: number;
   spent: number;
   status: "active" | "exhausted" | "revoked" | "expired";
+  spendable?: boolean;
   allowedTools?: string[];
   expiresAt?: string | null;
   grantedAt?: string;
@@ -163,6 +173,39 @@ export type FundMemberInput = {
   amount?: number;
 };
 
+export type FundingSummary = {
+  requested?: number;
+  funded?: number;
+  skipped?: number;
+  totalCredited?: number;
+};
+
+export type RevokeSummary = {
+  requested?: number;
+  revoked?: number;
+  notFound?: number;
+  totalReclaimed?: number;
+};
+
+export type FundJob = {
+  id?: string;
+  jobId?: string;
+  status: "queued" | "processing" | "completed" | "failed" | string;
+  progress?: number;
+  summary?: FundingSummary;
+  error?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AdminUser = UserSummary & {
+  role?: string;
+  isAdmin?: boolean;
+  createdAt?: string;
+  bonusBalance?: number;
+  bonusCount?: number;
+};
+
 export type UserBalance = {
   balance: number;
   currency: string;
@@ -196,6 +239,8 @@ export type WalletTransaction = {
   metadata?: Record<string, unknown>;
   createdAt: string;
 };
+
+export type AdminTransaction = WalletTransaction;
 
 type UserBalanceResponseData = UserBalance | { balance: UserBalance };
 
@@ -372,6 +417,8 @@ export async function listCampaigns(opts?: {
   createdFrom?: string;
   createdTo?: string;
   includeDeleted?: boolean;
+  budgetMin?: number | string;
+  budgetMax?: number | string;
   page?: number;
   limit?: number;
 }) {
@@ -381,12 +428,28 @@ export async function listCampaigns(opts?: {
   if (opts?.createdFrom) params.set("createdFrom", opts.createdFrom);
   if (opts?.createdTo) params.set("createdTo", opts.createdTo);
   if (opts?.includeDeleted) params.set("includeDeleted", "true");
+  if (opts?.budgetMin !== undefined && opts.budgetMin !== "") params.set("budgetMin", String(opts.budgetMin));
+  if (opts?.budgetMax !== undefined && opts.budgetMax !== "") params.set("budgetMax", String(opts.budgetMax));
   if (opts?.page) params.set("page", String(opts.page));
   if (opts?.limit) params.set("limit", String(opts.limit));
   const query = params.toString() ? `?${params.toString()}` : "";
   return fetchAuthJson<CampaignEnvelope<{ campaigns: Campaign[]; pagination: Pagination }>>(
     `/admin/campaigns${query}`,
     { token: opts?.token }
+  );
+}
+
+export async function getCampaign(id: string, token?: string) {
+  return fetchAuthJson<CampaignEnvelope<{ campaign: Campaign }>>(
+    `/admin/campaigns/${id}`,
+    { token }
+  );
+}
+
+export async function listCampaignServices(token?: string) {
+  return fetchAuthJson<CampaignEnvelope<{ services: CampaignService[] }>>(
+    "/admin/campaigns/services",
+    { token }
   );
 }
 
@@ -401,10 +464,14 @@ export async function createCampaign(input: CreateCampaignInput, token?: string)
 export async function updateCampaign(
   id: string,
   input: UpdateCampaignInput,
-  token?: string
+  token?: string,
+  opts?: { notify?: boolean }
 ) {
+  const params = new URLSearchParams();
+  if (opts?.notify === false) params.set("notify", "false");
+  const query = params.toString() ? `?${params.toString()}` : "";
   return fetchAuthJson<CampaignEnvelope<{ campaign: Campaign }>>(
-    `/admin/campaigns/${id}`,
+    `/admin/campaigns/${id}${query}`,
     {
       method: "PATCH",
       token,
@@ -459,16 +526,69 @@ export async function listAdminTransactions(opts?: {
   if (opts?.page) params.set("page", String(opts.page));
   if (opts?.limit) params.set("limit", String(opts.limit));
   const query = params.toString() ? `?${params.toString()}` : "";
-  return fetchAuthJson<CampaignEnvelope<{ transactions: WalletTransaction[]; pagination: Pagination }>>(
+  return fetchAuthJson<CampaignEnvelope<{ transactions: AdminTransaction[]; pagination: Pagination }>>(
     `/admin/transactions${query}`,
     { token: opts?.token }
   );
 }
 
-export async function deleteCampaign(id: string, opts?: { token?: string; cascadeRevoke?: boolean }) {
-  const query = opts?.cascadeRevoke ? "?cascadeRevoke=true" : "";
-  return fetchAuthJson<CampaignEnvelope<{ campaign?: Campaign; reclaimed?: number }>>(
-    `/admin/campaigns/${id}${query}`,
+export async function listAdminUsers(opts?: {
+  token?: string;
+  search?: string;
+  name?: string;
+  role?: string;
+  isAdmin?: boolean | "all";
+  createdFrom?: string;
+  createdTo?: string;
+  hasBonus?: boolean | "all";
+  page?: number;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.name) params.set("name", opts.name);
+  if (opts?.role && opts.role !== "all") params.set("role", opts.role);
+  if (opts?.isAdmin !== undefined && opts.isAdmin !== "all") params.set("isAdmin", String(opts.isAdmin));
+  if (opts?.createdFrom) params.set("createdFrom", opts.createdFrom);
+  if (opts?.createdTo) params.set("createdTo", opts.createdTo);
+  if (opts?.hasBonus !== undefined && opts.hasBonus !== "all") params.set("hasBonus", String(opts.hasBonus));
+  if (opts?.page) params.set("page", String(opts.page));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetchAuthJson<CampaignEnvelope<{ users: AdminUser[]; pagination: Pagination }>>(
+    `/admin/users${query}`,
+    { token: opts?.token }
+  );
+}
+
+export async function selectAllAdminUsers(opts?: {
+  token?: string;
+  search?: string;
+  name?: string;
+  role?: string;
+  isAdmin?: boolean | "all";
+  createdFrom?: string;
+  createdTo?: string;
+  hasBonus?: boolean | "all";
+}) {
+  const params = new URLSearchParams();
+  params.set("select", "all");
+  if (opts?.search) params.set("search", opts.search);
+  if (opts?.name) params.set("name", opts.name);
+  if (opts?.role && opts.role !== "all") params.set("role", opts.role);
+  if (opts?.isAdmin !== undefined && opts.isAdmin !== "all") params.set("isAdmin", String(opts.isAdmin));
+  if (opts?.createdFrom) params.set("createdFrom", opts.createdFrom);
+  if (opts?.createdTo) params.set("createdTo", opts.createdTo);
+  if (opts?.hasBonus !== undefined && opts.hasBonus !== "all") params.set("hasBonus", String(opts.hasBonus));
+  return fetchAuthJson<CampaignEnvelope<{ userIds: string[]; total: number }>>(
+    `/admin/users?${params.toString()}`,
+    { token: opts?.token }
+  );
+}
+
+export async function deleteCampaign(id: string, opts?: { token?: string }) {
+  return fetchAuthJson<CampaignEnvelope<{ campaign?: Campaign; forfeited?: { userId: string; amount?: number }[]; summary?: RevokeSummary }>>(
+    `/admin/campaigns/${id}`,
     {
       method: "DELETE",
       token: opts?.token,
@@ -483,6 +603,7 @@ export async function bulkFundCampaignMembers(
 ) {
   return fetchAuthJson<
     CampaignEnvelope<{
+      summary?: FundingSummary;
       funded: { userId: string; amount: number }[];
       unmatched: { userId?: string; email?: string; reason: string }[];
     }>
@@ -493,6 +614,32 @@ export async function bulkFundCampaignMembers(
   });
 }
 
+export async function createCampaignFundJob(
+  id: string,
+  input: { amount: number; allUsers?: boolean; members?: FundMemberInput[]; role?: string; notify?: boolean },
+  token?: string
+) {
+  return fetchAuthJson<CampaignEnvelope<{ job: FundJob }>>(`/admin/campaigns/${id}/fund-jobs`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getCampaignFundJob(id: string, jobId: string, token?: string) {
+  return fetchAuthJson<CampaignEnvelope<{ job: FundJob }>>(
+    `/admin/campaigns/${id}/fund-jobs/${jobId}`,
+    { token }
+  );
+}
+
+export async function listCampaignFundJobs(id: string, token?: string) {
+  return fetchAuthJson<CampaignEnvelope<{ jobs: FundJob[] }>>(
+    `/admin/campaigns/${id}/fund-jobs`,
+    { token }
+  );
+}
+
 export async function revokeCampaignMembers(
   id: string,
   userIds: string[],
@@ -500,6 +647,7 @@ export async function revokeCampaignMembers(
 ) {
   return fetchAuthJson<
     CampaignEnvelope<{
+      summary?: RevokeSummary;
       revoked: { userId: string; reclaimed: number }[];
       notFound: string[];
     }>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const AUTH_UPSTREAM =
-  process.env.MASTASKILLZ_AUTH_API_BASE_URL ?? "https://api.mastaskillz.com/auth";
+  process.env.MASTASKILLZ_AUTH_API_BASE_URL ?? "https://dev.api.mastaskillz.com";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;

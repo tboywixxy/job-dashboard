@@ -11,28 +11,40 @@ import {
   Loader2,
   LogOut,
   Pencil,
+  Plus,
   RefreshCw,
   ShieldCheck,
   Trash2,
   X,
+  Users,
   UserMinus,
   Wallet,
 } from "lucide-react";
+import { CustomSelect } from "@/components/CustomSelect";
 import { ToastNotice } from "@/components/ToastNotice";
 import {
   bulkFundCampaignMembers,
+  createCampaignFundJob,
   deleteCampaign,
+  getCampaign,
+  getCampaignFundJob,
   getUserBalance,
+  listAdminUsers,
   listAdminTransactions,
   listCampaignMembers,
   listCampaigns,
+  listCampaignServices,
   revokeCampaignMembers,
+  selectAllAdminUsers,
   setBillingConsent,
   updateCampaign,
+  type AdminUser,
   type Campaign,
   type CampaignEffectiveStatus,
   type CampaignMember,
+  type CampaignService,
   type CampaignStatus,
+  type FundJob,
   type Pagination,
   type UserBalance,
   type WalletTransaction,
@@ -43,9 +55,45 @@ type Notice = {
   text: string;
 };
 
+type CampaignTab = "campaigns" | "members" | "funding" | "users" | "transactions" | "wallet";
+
 const statusOptions: (CampaignEffectiveStatus | "all")[] = ["all", "active", "paused", "expired", "ended"];
 const memberStatusOptions: (CampaignMember["status"] | "all")[] = ["all", "active", "exhausted", "expired", "revoked"];
 const emptyPagination: Pagination = { total: 0, page: 1, limit: 20, totalPages: 1 };
+
+const campaignStatusSelectOptions = statusOptions.map((status) => ({
+  value: status,
+  label: status === "all" ? "All statuses" : status,
+}));
+
+const editableStatusSelectOptions: { value: CampaignStatus; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "paused", label: "Paused" },
+  { value: "ended", label: "Ended" },
+];
+
+const memberStatusSelectOptions = memberStatusOptions.map((status) => ({
+  value: status,
+  label: status === "all" ? "All members" : status,
+}));
+
+const bonusSelectOptions: { value: "all" | "true" | "false"; label: string }[] = [
+  { value: "all", label: "Any bonus" },
+  { value: "true", label: "Has bonus" },
+  { value: "false", label: "No bonus" },
+];
+
+const transactionTypeSelectOptions: { value: "all" | "credit" | "debit"; label: string }[] = [
+  { value: "all", label: "All types" },
+  { value: "credit", label: "Credit" },
+  { value: "debit", label: "Debit" },
+];
+
+const transactionStatusSelectOptions: { value: "all" | "completed" | "failed"; label: string }[] = [
+  { value: "all", label: "All statuses" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+];
 
 function currency(value: number | null | undefined) {
   if (value == null) return "Uncapped";
@@ -114,6 +162,32 @@ function parseMembers(input: string, amount?: number) {
         ? { email: identifier, amount: rowAmount }
         : { userId: identifier, amount: rowAmount };
     });
+}
+
+function summaryText(prefix: string, summary?: { requested?: number; funded?: number; skipped?: number; totalCredited?: number; revoked?: number; notFound?: number; totalReclaimed?: number }) {
+  if (!summary) return prefix;
+  const parts = [
+    summary.requested !== undefined ? `requested ${summary.requested}` : "",
+    summary.funded !== undefined ? `funded ${summary.funded}` : "",
+    summary.revoked !== undefined ? `revoked ${summary.revoked}` : "",
+    summary.skipped !== undefined ? `skipped ${summary.skipped}` : "",
+    summary.notFound !== undefined ? `not found ${summary.notFound}` : "",
+    summary.totalCredited !== undefined ? `credited ${currency(summary.totalCredited)}` : "",
+    summary.totalReclaimed !== undefined ? `reclaimed ${currency(summary.totalReclaimed)}` : "",
+  ].filter(Boolean);
+  return parts.length ? `${prefix}: ${parts.join(", ")}.` : prefix;
+}
+
+function serviceName(services: CampaignService[], id: string) {
+  return services.find((service) => service.id === id)?.label || id.replace(/_/g, " ");
+}
+
+function jobId(job: FundJob) {
+  return job.jobId || job.id || "";
+}
+
+function isFinalJobStatus(status: string) {
+  return status === "completed" || status === "failed";
 }
 
 function effectiveStatus(campaign: Campaign) {
@@ -193,16 +267,22 @@ function PageControls({
 }
 
 export function CampaignsPanel({ token }: { token: string }) {
+  const [activeTab, setActiveTab] = useState<CampaignTab>("campaigns");
   const [statusFilter, setStatusFilter] = useState<CampaignEffectiveStatus | "all">("all");
   const [nameFilter, setNameFilter] = useState("");
   const [createdFrom, setCreatedFrom] = useState("");
   const [createdTo, setCreatedTo] = useState("");
   const [includeDeleted, setIncludeDeleted] = useState(false);
+  const [budgetMin, setBudgetMin] = useState("");
+  const [budgetMax, setBudgetMax] = useState("");
   const [campaignPage, setCampaignPage] = useState(1);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignPagination, setCampaignPagination] = useState<Pagination>(emptyPagination);
 
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [campaignDetails, setCampaignDetails] = useState<Campaign | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [services, setServices] = useState<CampaignService[]>([]);
   const [members, setMembers] = useState<CampaignMember[]>([]);
   const [memberStatusFilter, setMemberStatusFilter] = useState<CampaignMember["status"] | "all">("all");
   const [memberPage, setMemberPage] = useState(1);
@@ -218,30 +298,52 @@ export function CampaignsPanel({ token }: { token: string }) {
   const [transactionFrom, setTransactionFrom] = useState("");
   const [transactionTo, setTransactionTo] = useState("");
 
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [userPagination, setUserPagination] = useState<Pagination>(emptyPagination);
+  const [userPage, setUserPage] = useState(1);
+  const [userSearch, setUserSearch] = useState("");
+  const [userRole, setUserRole] = useState("");
+  const [userHasBonus, setUserHasBonus] = useState<"all" | "true" | "false">("all");
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectAllTotal, setSelectAllTotal] = useState<number | null>(null);
+
   const [balance, setBalance] = useState<UserBalance | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const [fundAmount, setFundAmount] = useState("500");
   const [fundMembers, setFundMembers] = useState("");
+  const [fundRole, setFundRole] = useState("");
   const [notifyMembers, setNotifyMembers] = useState(true);
   const [revokeUsers, setRevokeUsers] = useState("");
-  const [cascadeDelete, setCascadeDelete] = useState(false);
+  const [fundJob, setFundJob] = useState<FundJob | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editStatus, setEditStatus] = useState<CampaignStatus>("active");
   const [editBudgetCap, setEditBudgetCap] = useState("");
   const [editExpiresAt, setEditExpiresAt] = useState("");
-  const [editCoversCvOptimization, setEditCoversCvOptimization] = useState(true);
+  const [editAllowedTools, setEditAllowedTools] = useState<string[]>([]);
+  const [editNotify, setEditNotify] = useState(true);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
 
   const selectedCampaign = useMemo(
-    () => campaigns.find((campaign) => campaign.id === selectedCampaignId) || null,
-    [campaigns, selectedCampaignId]
+    () => campaignDetails || campaigns.find((campaign) => campaign.id === selectedCampaignId) || null,
+    [campaignDetails, campaigns, selectedCampaignId]
   );
   const bonusBalance = balance?.bonus?.balance ?? 0;
   const bonusItems = balance?.bonus?.items ?? [];
   const selectedIsEnded = selectedCampaign?.status === "ended" || selectedCampaign?.effectiveStatus === "ended";
+  const selectedEffectiveStatus = selectedCampaign ? effectiveStatus(selectedCampaign) : "";
+  const selectedIsDeleted = selectedEffectiveStatus === "deleted" || Boolean(selectedCampaign?.deletedAt);
+  const canFundSelected = Boolean(selectedCampaignId) && !loading && !selectedIsEnded && !selectedIsDeleted;
+  const tabs: { id: CampaignTab; label: string; count?: number }[] = [
+    { id: "campaigns", label: "Campaigns", count: campaignPagination.total },
+    { id: "members", label: "Members", count: memberPagination.total },
+    { id: "funding", label: "Funding", count: fundJob ? 1 : undefined },
+    { id: "users", label: "Users", count: userPagination.total },
+    { id: "transactions", label: "Transactions", count: transactionPagination.total },
+    { id: "wallet", label: "Wallet" },
+  ];
 
   const totalStats = useMemo(() => {
     return campaigns.reduce(
@@ -250,9 +352,11 @@ export function CampaignsPanel({ token }: { token: string }) {
         acc.totalGranted += campaign.stats?.totalGranted || 0;
         acc.totalRemaining += campaign.stats?.totalRemaining || 0;
         acc.totalSpent += campaign.stats?.totalSpent || 0;
+        acc.spendableRemaining += campaign.stats?.spendableRemaining || 0;
+        acc.budgetRemaining += campaign.stats?.budgetRemaining || 0;
         return acc;
       },
-      { memberCount: 0, totalGranted: 0, totalRemaining: 0, totalSpent: 0 }
+      { memberCount: 0, totalGranted: 0, totalRemaining: 0, totalSpent: 0, spendableRemaining: 0, budgetRemaining: 0 }
     );
   }, [campaigns]);
 
@@ -262,6 +366,7 @@ export function CampaignsPanel({ token }: { token: string }) {
 
   const selectCampaign = (campaign: Campaign) => {
     setSelectedCampaignId(campaign.id);
+    setCampaignDetails(campaign);
     setMembers([]);
     setMemberPagination(emptyPagination);
     setMemberPage(1);
@@ -274,8 +379,31 @@ export function CampaignsPanel({ token }: { token: string }) {
     setEditStatus(campaign.status);
     setEditBudgetCap(campaign.budgetCap == null ? "" : String(campaign.budgetCap));
     setEditExpiresAt(dateInputValue(campaign.expiresAt));
-    setEditCoversCvOptimization(campaign.allowedTools.length === 0 || campaign.allowedTools.includes("cv_optimization"));
+    setEditAllowedTools(campaign.allowedTools || []);
+    setEditNotify(true);
   };
+
+  const toggleEditTool = (id: string) => {
+    setEditAllowedTools((current) =>
+      current.includes(id) ? current.filter((tool) => tool !== id) : [...current, id]
+    );
+  };
+
+  const loadCampaignDetails = useCallback(async (id = selectedCampaignId) => {
+    if (!id) {
+      setCampaignDetails(null);
+      return;
+    }
+    setDetailsLoading(true);
+    try {
+      const res = await getCampaign(id, token);
+      setCampaignDetails(res.data.campaign);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, [selectedCampaignId, showError, token]);
 
   const loadMembers = useCallback(async (id = selectedCampaignId, page = memberPage) => {
     if (!id) {
@@ -314,6 +442,8 @@ export function CampaignsPanel({ token }: { token: string }) {
         createdFrom: isoDateBoundary(createdFrom, "start"),
         createdTo: isoDateBoundary(createdTo, "end"),
         includeDeleted,
+        budgetMin,
+        budgetMax,
         page,
         limit: 20,
       });
@@ -323,6 +453,7 @@ export function CampaignsPanel({ token }: { token: string }) {
       setCampaignPage(res.data.pagination?.page || page);
       setSelectedCampaignId((currentId) => {
         if (currentId && items.some((campaign) => campaign.id === currentId)) return currentId;
+        setCampaignDetails(items[0] || null);
         return items[0]?.id || "";
       });
       setNotice({ tone: "success", text: "Campaigns refreshed." });
@@ -331,7 +462,39 @@ export function CampaignsPanel({ token }: { token: string }) {
     } finally {
       setLoading(false);
     }
-  }, [campaignPage, createdFrom, createdTo, includeDeleted, nameFilter, showError, statusFilter, token]);
+  }, [budgetMax, budgetMin, campaignPage, createdFrom, createdTo, includeDeleted, nameFilter, showError, statusFilter, token]);
+
+  const loadServices = useCallback(async () => {
+    try {
+      const res = await listCampaignServices(token);
+      setServices(res.data.services || []);
+    } catch (err) {
+      showError(err);
+    }
+  }, [showError, token]);
+
+  const loadUsers = useCallback(async (page = userPage) => {
+    setLoading(true);
+    setNotice(null);
+    try {
+      const res = await listAdminUsers({
+        token,
+        search: userSearch.trim(),
+        role: userRole.trim(),
+        hasBonus: userHasBonus === "all" ? "all" : userHasBonus === "true",
+        page,
+        limit: 10,
+      });
+      setUsers(res.data.users || []);
+      setUserPagination(res.data.pagination || emptyPagination);
+      setUserPage(res.data.pagination?.page || page);
+      setSelectAllTotal(null);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [showError, token, userHasBonus, userPage, userRole, userSearch]);
 
   const loadTransactions = useCallback(async (page = transactionPage) => {
     setLoading(true);
@@ -364,6 +527,17 @@ export function CampaignsPanel({ token }: { token: string }) {
   }, [loadCampaigns, token]);
 
   useEffect(() => {
+    if (token) void loadServices();
+  }, [loadServices, token]);
+
+  useEffect(() => {
+    if (selectedCampaignId) {
+      void loadCampaignDetails(selectedCampaignId);
+      void loadMembers(selectedCampaignId, 1);
+    }
+  }, [loadCampaignDetails, loadMembers, selectedCampaignId]);
+
+  useEffect(() => {
     if (!notice) return;
     const timeout = window.setTimeout(() => setNotice(null), notice.tone === "error" ? 7000 : 4000);
     return () => window.clearTimeout(timeout);
@@ -391,17 +565,22 @@ export function CampaignsPanel({ token }: { token: string }) {
 
   const handleDelete = async () => {
     if (!selectedCampaignId) return;
+    if (selectedIsDeleted) {
+      setNotice({ tone: "info", text: "Deleted campaigns do not offer delete or funding actions." });
+      return;
+    }
     setLoading(true);
     setNotice(null);
     try {
-      await deleteCampaign(selectedCampaignId, { token, cascadeRevoke: cascadeDelete });
+      const res = await deleteCampaign(selectedCampaignId, { token });
       setSelectedCampaignId("");
+      setCampaignDetails(null);
       setMembers([]);
       setNotice({
         tone: "success",
-        text: cascadeDelete
-          ? "Campaign deleted and unspent member bonus reclaimed."
-          : "Campaign deleted. It will be hidden unless deleted campaigns are included.",
+        text: res.data.summary
+          ? summaryText("Campaign deleted and unused member bonuses forfeited", res.data.summary)
+          : `Campaign deleted. ${res.data.forfeited?.length || 0} member bonus item(s) forfeited.`,
       });
       await loadCampaigns(1);
     } catch (err) {
@@ -440,10 +619,11 @@ export function CampaignsPanel({ token }: { token: string }) {
           description: editDescription.trim(),
           status: editStatus,
           budgetCap: editBudgetCap ? Number(editBudgetCap) : null,
-          allowedTools: editCoversCvOptimization ? ["cv_optimization"] : [],
+          allowedTools: editAllowedTools,
           expiresAt: editExpiresAt ? new Date(`${editExpiresAt}T23:59:59.999`).toISOString() : null,
         },
-        token
+        token,
+        { notify: editNotify }
       );
       setNotice({ tone: "success", text: "Campaign updated." });
       setEditingCampaign(null);
@@ -458,8 +638,100 @@ export function CampaignsPanel({ token }: { token: string }) {
     }
   };
 
+  const pollFundJob = async (initialJob: FundJob) => {
+    const id = jobId(initialJob);
+    if (!id || !selectedCampaignId) return;
+    let current = initialJob;
+    for (let attempt = 0; attempt < 60 && !isFinalJobStatus(current.status); attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      const res = await getCampaignFundJob(selectedCampaignId, id, token);
+      current = res.data.job;
+      setFundJob(current);
+    }
+    setNotice({
+      tone: current.status === "completed" ? "success" : current.status === "failed" ? "error" : "info",
+      text: current.summary
+        ? summaryText(`Funding job ${jobId(current) || id} ${current.status}`, current.summary)
+        : `Funding job ${jobId(current) || id} is ${current.status}.`,
+    });
+  };
+
+  const handleSelectVisibleUser = (userId: string, checked: boolean) => {
+    setSelectedUserIds((current) =>
+      checked ? Array.from(new Set([...current, userId])) : current.filter((id) => id !== userId)
+    );
+    setSelectAllTotal(null);
+  };
+
+  const handleSelectAllFilteredUsers = async () => {
+    setLoading(true);
+    setNotice(null);
+    try {
+      const res = await selectAllAdminUsers({
+        token,
+        search: userSearch.trim(),
+        role: userRole.trim(),
+        hasBonus: userHasBonus === "all" ? "all" : userHasBonus === "true",
+      });
+      setSelectedUserIds(res.data.userIds || []);
+      setSelectAllTotal(res.data.total || 0);
+      setNotice({ tone: "success", text: `${(res.data.total || 0).toLocaleString()} filtered user(s) selected for campaign funding.` });
+    } catch (err) {
+      showError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFundSelectedUsers = async () => {
+    if (!selectedCampaignId) return;
+    if (!canFundSelected) {
+      setNotice({ tone: "info", text: "Funding is disabled for ended or deleted campaigns." });
+      return;
+    }
+    const amount = Number(fundAmount);
+    if (!amount || amount <= 0) {
+      setNotice({ tone: "error", text: "Enter a funding amount above zero." });
+      return;
+    }
+    if (!selectedUserIds.length) {
+      setNotice({ tone: "error", text: "Select at least one user first." });
+      return;
+    }
+
+    setLoading(true);
+    setNotice(null);
+    try {
+      const jobRes = await createCampaignFundJob(
+        selectedCampaignId,
+        {
+          amount,
+          allUsers: selectAllTotal !== null,
+          members: selectAllTotal === null ? selectedUserIds.map((userId) => ({ userId, amount })) : undefined,
+          role: fundRole.trim() || undefined,
+          notify: notifyMembers,
+        },
+        token
+      );
+      const job = jobRes.data.job;
+      setFundJob(job);
+      setNotice({ tone: "info", text: `Funding job ${jobId(job) || "started"} is ${job.status}.` });
+      await pollFundJob(job);
+      await loadCampaigns(campaignPage);
+      await loadMembers(selectedCampaignId, 1);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFund = async () => {
     if (!selectedCampaignId) return;
+    if (!canFundSelected) {
+      setNotice({ tone: "info", text: "Funding is disabled for ended or deleted campaigns." });
+      return;
+    }
     const sharedAmount = Number(fundAmount);
     const parsedMembers = parseMembers(fundMembers, sharedAmount);
 
@@ -471,18 +743,30 @@ export function CampaignsPanel({ token }: { token: string }) {
     setLoading(true);
     setNotice(null);
     try {
-      const res = await bulkFundCampaignMembers(
-        selectedCampaignId,
-        { members: parsedMembers, amount: sharedAmount, notify: notifyMembers },
-        token
-      );
-      const funded = res.data.funded?.length || 0;
-      const unmatched = res.data.unmatched?.length || 0;
+      if (parsedMembers.length > 100) {
+        const jobRes = await createCampaignFundJob(
+          selectedCampaignId,
+          { members: parsedMembers, amount: sharedAmount, notify: notifyMembers },
+          token
+        );
+        const job = jobRes.data.job;
+        setFundJob(job);
+        setNotice({ tone: "info", text: `Funding job ${jobId(job) || "started"} is ${job.status}.` });
+        await pollFundJob(job);
+      } else {
+        const res = await bulkFundCampaignMembers(
+          selectedCampaignId,
+          { members: parsedMembers, amount: sharedAmount, notify: notifyMembers },
+          token
+        );
+        const funded = res.data.summary?.funded ?? res.data.funded?.length ?? 0;
+        const unmatched = res.data.unmatched?.length || res.data.summary?.skipped || 0;
+        setNotice({
+          tone: unmatched ? "info" : "success",
+          text: summaryText(`Funded ${funded} member(s); ${unmatched} unmatched`, res.data.summary),
+        });
+      }
       setFundMembers("");
-      setNotice({
-        tone: unmatched ? "info" : "success",
-        text: `Funded ${funded} member(s). ${unmatched} unmatched.`,
-      });
       await loadCampaigns(campaignPage);
       await loadMembers(selectedCampaignId, 1);
     } catch (err) {
@@ -511,7 +795,10 @@ export function CampaignsPanel({ token }: { token: string }) {
       setRevokeUsers("");
       setNotice({
         tone: "success",
-        text: `Revoked ${res.data.revoked?.length || 0}; ${res.data.notFound?.length || 0} not found.`,
+        text: summaryText(
+          `Revoked ${res.data.revoked?.length || 0}; ${res.data.notFound?.length || 0} not found`,
+          res.data.summary
+        ),
       });
       await loadCampaigns(campaignPage);
       await loadMembers(selectedCampaignId, memberPage);
@@ -609,16 +896,13 @@ export function CampaignsPanel({ token }: { token: string }) {
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="grid gap-1 text-sm font-medium text-slate-700">
                   Status
-                  <select
+                  <CustomSelect
                     value={editStatus}
-                    onChange={(event) => setEditStatus(event.target.value as CampaignStatus)}
+                    options={editableStatusSelectOptions}
+                    onChange={setEditStatus}
                     disabled={loading || editingCampaign.status === "ended" || editingCampaign.effectiveStatus === "ended"}
-                    className="min-h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal capitalize outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10 disabled:opacity-60"
-                  >
-                    <option value="active">Active</option>
-                    <option value="paused">Paused</option>
-                    <option value="ended">Ended</option>
-                  </select>
+                    ariaLabel="Campaign status"
+                  />
                 </label>
 
                 <label className="grid gap-1 text-sm font-medium text-slate-700">
@@ -641,20 +925,45 @@ export function CampaignsPanel({ token }: { token: string }) {
                     onChange={(event) => setEditExpiresAt(event.target.value)}
                     type="date"
                     disabled={loading}
-                    className="min-h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10 disabled:opacity-60"
+                    className="custom-date min-h-11 text-sm font-normal disabled:opacity-60"
                   />
                 </label>
+              </div>
+
+              <div className="grid gap-2 rounded-lg bg-slate-50 px-3 py-3">
+                <p className="text-sm font-medium text-slate-700">Allowed services</p>
+                {services.length ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {services.map((service) => (
+                      <label key={service.id} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={editAllowedTools.includes(service.id)}
+                          onChange={() => toggleEditTool(service.id)}
+                          disabled={loading || !service.live}
+                          className="mt-0.5 h-4 w-4 accent-[#48C05C]"
+                        />
+                        <span>
+                          <span className="block font-medium text-slate-800">{service.label}</span>
+                          {service.description && <span className="block text-xs text-slate-500">{service.description}</span>}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">No campaign services loaded.</p>
+                )}
               </div>
 
               <label className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
                 <input
                   type="checkbox"
-                  checked={editCoversCvOptimization}
-                  onChange={(event) => setEditCoversCvOptimization(event.target.checked)}
+                  checked={editNotify}
+                  onChange={(event) => setEditNotify(event.target.checked)}
                   disabled={loading}
                   className="h-4 w-4 accent-[#48C05C]"
                 />
-                Covers CV optimization
+                Notify members about expiry or service changes
               </label>
             </div>
 
@@ -681,42 +990,48 @@ export function CampaignsPanel({ token }: { token: string }) {
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#2f8f42]">
-              <ShieldCheck className="h-4 w-4" />
-              Promotional bonus admin
+      <section className="relative overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 bg-white px-4 py-2.5 sm:px-5">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[#2f8f42]">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Promotional bonus admin
+              </div>
+              <p className="max-w-3xl text-[11px] leading-4 text-slate-500">
+                Filter campaigns, inspect members, fund users, and audit wallet activity from one workspace.
+              </p>
             </div>
-            <p className="max-w-3xl text-sm leading-6 text-slate-500">
-              Filter paginated campaigns, inspect members, and review wallet activity.
-            </p>
+            <button
+              onClick={() => loadCampaigns(1)}
+              disabled={loading}
+              className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Refresh data
+            </button>
           </div>
+        </div>
 
-          <div className="flex w-full flex-col gap-3 xl:max-w-4xl">
-            <div className="grid w-full gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="px-4 py-2.5 sm:px-5">
+          <div className="flex w-full flex-col gap-3">
+            <div className="grid w-full gap-2 rounded-lg bg-slate-50 p-2 sm:grid-cols-2 xl:grid-cols-4">
               <input
                 value={nameFilter}
                 onChange={(event) => setNameFilter(event.target.value)}
                 placeholder="Campaign name"
-                className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+                className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
               />
-              <select
+              <CustomSelect
                 value={statusFilter}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value as CampaignEffectiveStatus | "all");
+                options={campaignStatusSelectOptions}
+                onChange={(value) => {
+                  setStatusFilter(value);
                   setCampaignPage(1);
                 }}
-                aria-label="Filter campaigns by status"
-                className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm capitalize text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status === "all" ? "All statuses" : status}
-                  </option>
-                ))}
-              </select>
-              <label className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                ariaLabel="Filter campaigns by status"
+              />
+              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
                 <input
                   type="checkbox"
                   checked={includeDeleted}
@@ -725,39 +1040,41 @@ export function CampaignsPanel({ token }: { token: string }) {
                 />
                 Include deleted
               </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+              <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
                 Created from
                 <input
                   type="date"
                   value={createdFrom}
                   onChange={(event) => setCreatedFrom(event.target.value)}
-                  className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+                  className="custom-date min-h-10 text-sm font-normal"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+              <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
                 Created to
                 <input
                   type="date"
                   value={createdTo}
                   onChange={(event) => setCreatedTo(event.target.value)}
-                  className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+                  className="custom-date min-h-10 text-sm font-normal"
                 />
               </label>
-              <div className="grid gap-2 sm:col-span-2 sm:grid-cols-3 xl:col-span-3 xl:flex xl:justify-end">
-                <Link
-                  href="/campaigns/create"
-                  className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e]"
-                >
-                  Create campaign
-                </Link>
-                <button
-                  onClick={() => loadCampaigns(1)}
-                  disabled={loading}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  Refresh
-                </button>
+              <input
+                value={budgetMin}
+                onChange={(event) => setBudgetMin(event.target.value)}
+                type="number"
+                min="0"
+                placeholder="Budget min"
+                className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+              />
+              <input
+                value={budgetMax}
+                onChange={(event) => setBudgetMax(event.target.value)}
+                type="number"
+                min="0"
+                placeholder="Budget max"
+                className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
+              />
+              <div className="grid gap-2 sm:col-span-2 xl:col-span-4 xl:flex xl:justify-end">
                 <button
                   onClick={() => {
                     setCampaigns([]);
@@ -769,10 +1086,10 @@ export function CampaignsPanel({ token }: { token: string }) {
                     setNotice({ tone: "info", text: "Use the sidebar account control to end this admin session." });
                   }}
                   disabled={loading}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white disabled:opacity-60"
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
                 >
                   <LogOut className="h-4 w-4" />
-                  Clear
+                  Clear workspace
                 </button>
               </div>
             </div>
@@ -781,12 +1098,48 @@ export function CampaignsPanel({ token }: { token: string }) {
 
       </section>
 
+      <div className="sticky top-[57px] z-10 overflow-x-auto rounded-lg bg-slate-100/60 px-2 py-1.5 backdrop-blur lg:top-0 dark:bg-white/5">
+        <div className="flex min-w-max items-center gap-1">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`relative inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition ${
+                  isActive
+                    ? "bg-[#48C05C]/10 text-[#2f8f42]"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                }`}
+                aria-current={isActive ? "page" : undefined}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${isActive ? "bg-white text-[#2f8f42]" : "bg-slate-100 text-slate-500"}`}>
+                    {tab.count.toLocaleString()}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          <Link
+            href="/campaigns/create"
+            className="ml-1 inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+          >
+            <Plus className="h-4 w-4" />
+            Create Campaign
+          </Link>
+        </div>
+      </div>
+
+      {activeTab === "campaigns" && (
       <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {[
           ["Campaigns", campaignPagination.total.toLocaleString()],
           ["Members", totalStats.memberCount.toLocaleString()],
           ["Granted", currency(totalStats.totalGranted)],
-          ["Remaining", currency(totalStats.totalRemaining)],
+          ["Spendable", currency(totalStats.spendableRemaining)],
         ].map(([label, value]) => (
           <div key={label} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
@@ -794,7 +1147,9 @@ export function CampaignsPanel({ token }: { token: string }) {
           </div>
         ))}
       </section>
+      )}
 
+      {activeTab === "campaigns" && (
       <section className="grid gap-6">
         <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -827,7 +1182,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                     </div>
                     <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                       <div><dt className="text-xs text-slate-500">Granted</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.totalGranted || 0)}</dd></div>
-                      <div><dt className="text-xs text-slate-500">Remaining</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.totalRemaining || 0)}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Spendable</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.spendableRemaining || 0)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Expires</dt><dd className="mt-1 font-medium text-slate-800">{dateText(campaign.expiresAt)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Budget</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.budgetCap)}</dd></div>
                     </dl>
@@ -857,7 +1212,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Expires</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Granted</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Remaining</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Spendable</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Budget</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
                   </tr>
@@ -889,7 +1244,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                           </td>
                           <td className="px-4 py-3 text-slate-600">{dateText(campaign.expiresAt)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.totalGranted || 0)}</td>
-                          <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.totalRemaining || 0)}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.spendableRemaining || 0)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.budgetCap)}</td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -915,8 +1270,87 @@ export function CampaignsPanel({ token }: { token: string }) {
           <PageControls pagination={campaignPagination} onPageChange={(page) => loadCampaigns(page)} disabled={loading} />
         </div>
       </section>
+      )}
 
+      {activeTab === "users" && (
+      <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="mb-4 flex flex-col gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-[#2f8f42]" />
+              <h3 className="text-base font-semibold text-slate-950">Admin Users</h3>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">Server-side user filters support select-all funding without loading every page.</p>
+          </div>
+          <div className="grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+            <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
+            <input value={userRole} onChange={(event) => setUserRole(event.target.value)} placeholder="Role" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
+            <CustomSelect value={userHasBonus} options={bonusSelectOptions} onChange={setUserHasBonus} ariaLabel="Filter users by bonus" />
+            <button onClick={() => loadUsers(1)} disabled={loading} className="min-h-11 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
+              Load users
+            </button>
+            <button onClick={handleSelectAllFilteredUsers} disabled={loading} className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">
+              Select all filtered
+            </button>
+          </div>
+          <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              {selectAllTotal !== null
+                ? `${selectAllTotal.toLocaleString()} filtered user(s) selected`
+                : `${selectedUserIds.length.toLocaleString()} visible user(s) selected`}
+            </span>
+            <button onClick={handleFundSelectedUsers} disabled={!canFundSelected || !selectedUserIds.length} className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-50">
+              Fund selected users
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="min-w-[820px] text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Select</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">User</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Role</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Bonus balance</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Bonus count</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {!users.length ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">No users loaded.</td>
+                </tr>
+              ) : users.map((user) => {
+                const summary = displayUser(user);
+                const id = user.userId || user.id || "";
+                return (
+                  <tr key={id || summary.primary}>
+                    <td className="px-4 py-3">
+                      <input type="checkbox" checked={Boolean(id && selectedUserIds.includes(id))} disabled={!id || loading} onChange={(event) => handleSelectVisibleUser(id, event.target.checked)} className="h-4 w-4 accent-[#48C05C]" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-slate-950">{summary.primary}</p>
+                      {summary.secondary && <p className="text-xs text-slate-400">{summary.secondary}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{user.role || "-"}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{currency(user.bonusBalance || 0)}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{(user.bonusCount || 0).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-slate-600">{dateText(user.createdAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <PageControls pagination={userPagination} onPageChange={(page) => loadUsers(page)} disabled={loading} />
+      </section>
+      )}
+
+      {(activeTab === "members" || activeTab === "funding") && (
       <section className="grid gap-6 2xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] 2xl:gap-8">
+        {activeTab === "members" && (
         <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-5 flex flex-col gap-4">
             <div>
@@ -925,18 +1359,16 @@ export function CampaignsPanel({ token }: { token: string }) {
             </div>
             <div className="grid gap-3 rounded-lg bg-slate-50 p-3 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-start">
               <div className="grid gap-2 sm:grid-cols-[minmax(180px,240px)_auto]">
-              <select
+              <CustomSelect
                 value={memberStatusFilter}
-                onChange={(event) => {
-                  setMemberStatusFilter(event.target.value as CampaignMember["status"] | "all");
+                options={memberStatusSelectOptions}
+                onChange={(value) => {
+                  setMemberStatusFilter(value);
                   setMemberPage(1);
                 }}
-                className="col-span-2 min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm capitalize text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10 sm:col-span-1"
-              >
-                {memberStatusOptions.map((status) => (
-                  <option key={status} value={status}>{status === "all" ? "All members" : status}</option>
-                ))}
-              </select>
+                ariaLabel="Filter campaign members"
+                className="col-span-2 sm:col-span-1"
+              />
               <button
                 onClick={() => loadMembers(selectedCampaignId, 1)}
                 disabled={!selectedCampaignId || loading}
@@ -961,14 +1393,14 @@ export function CampaignsPanel({ token }: { token: string }) {
           </div>
 
           {selectedCampaign ? (
-            <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-5">
+            <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-6">
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Selected</p>
                 <p className="truncate text-sm font-semibold text-slate-950">{selectedCampaign.name}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Status</p>
-                <p className="text-sm font-semibold capitalize text-slate-950">{effectiveStatus(selectedCampaign)}</p>
+                <p className="text-sm font-semibold capitalize text-slate-950">{detailsLoading ? "Loading" : effectiveStatus(selectedCampaign)}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Members</p>
@@ -981,9 +1413,19 @@ export function CampaignsPanel({ token }: { token: string }) {
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Budget left</p>
                 <p className="text-sm font-semibold text-slate-950">
-                  {selectedCampaign.budgetCap == null
-                    ? "Uncapped"
-                    : currency(selectedCampaign.budgetCap - (selectedCampaign.stats?.totalGranted || 0))}
+                  {currency(selectedCampaign.stats?.budgetRemaining ?? (selectedCampaign.budgetCap == null ? null : selectedCampaign.budgetCap - (selectedCampaign.stats?.totalGranted || 0)))}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">Spendable left</p>
+                <p className="text-sm font-semibold text-slate-950">{currency(selectedCampaign.stats?.spendableRemaining || 0)}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">Services</p>
+                <p className="truncate text-sm font-semibold capitalize text-slate-950">
+                  {selectedCampaign.allowedTools?.length
+                    ? selectedCampaign.allowedTools.map((tool) => serviceName(services, tool)).join(", ")
+                    : "All services"}
                 </p>
               </div>
             </div>
@@ -1009,6 +1451,9 @@ export function CampaignsPanel({ token }: { token: string }) {
                       <div><dt className="text-xs text-slate-500">Spent</dt><dd className="font-medium text-slate-800">{currency(member.spent)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Left</dt><dd className="font-medium text-slate-800">{currency(member.remaining)}</dd></div>
                     </dl>
+                    <p className="mt-3 text-xs text-slate-500">
+                      {member.spendable ? "Spendable now" : "Not currently spendable"} · {dateText(member.expiresAt)}
+                    </p>
                   </div>
                 );
               })
@@ -1024,13 +1469,16 @@ export function CampaignsPanel({ token }: { token: string }) {
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Granted</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Spent</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Remaining</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Spendable</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Tools</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Expires</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {!members.length ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">No members loaded.</td>
+                      <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">No members loaded.</td>
                     </tr>
                   ) : (
                     members.map((member) => {
@@ -1044,6 +1492,9 @@ export function CampaignsPanel({ token }: { token: string }) {
                           <td className="px-4 py-3 text-right text-slate-600">{currency(member.granted)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{currency(member.spent)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{currency(member.remaining)}</td>
+                          <td className="px-4 py-3 text-slate-600">{member.spendable ? "Yes" : "No"}</td>
+                          <td className="px-4 py-3 text-slate-600">{member.allowedTools?.length ? member.allowedTools.map((tool) => serviceName(services, tool)).join(", ") : "All"}</td>
+                          <td className="px-4 py-3 text-slate-600">{dateText(member.expiresAt)}</td>
                           <td className="px-4 py-3">
                             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(member.status)}`}>{member.status}</span>
                           </td>
@@ -1057,7 +1508,9 @@ export function CampaignsPanel({ token }: { token: string }) {
           </div>
           <PageControls pagination={memberPagination} onPageChange={(page) => loadMembers(selectedCampaignId, page)} disabled={loading || !selectedCampaignId} />
         </div>
+        )}
 
+        {activeTab === "funding" && (
         <div className="grid gap-6 md:grid-cols-2 2xl:grid-cols-1">
           <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -1073,6 +1526,12 @@ export function CampaignsPanel({ token }: { token: string }) {
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
                 placeholder="Shared amount"
               />
+              <input
+                value={fundRole}
+                onChange={(event) => setFundRole(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
+                placeholder="Optional role for async select all"
+              />
               <textarea
                 value={fundMembers}
                 onChange={(event) => setFundMembers(event.target.value)}
@@ -1086,11 +1545,19 @@ export function CampaignsPanel({ token }: { token: string }) {
               </label>
               <button
                 onClick={handleFund}
-                disabled={!selectedCampaignId || loading}
+                disabled={!canFundSelected}
                 className="mt-auto min-h-11 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
               >
                 Fund selected campaign
               </button>
+              {fundJob && (
+                <div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">
+                  <p className="font-medium capitalize text-slate-700">Job {jobId(fundJob) || "-"} · {fundJob.status}</p>
+                  <p>Progress: {fundJob.progress ?? 0}%</p>
+                  {fundJob.summary && <p>{summaryText("Summary", fundJob.summary)}</p>}
+                  {fundJob.error && <p className="text-rose-600">{fundJob.error}</p>}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1113,13 +1580,12 @@ export function CampaignsPanel({ token }: { token: string }) {
             >
               Revoke unused credit
             </button>
-            <label className="mt-4 flex items-start gap-2 text-sm text-slate-600">
-              <input type="checkbox" checked={cascadeDelete} onChange={(event) => setCascadeDelete(event.target.checked)} className="mt-0.5 h-4 w-4 accent-rose-600" />
-              Reclaim unspent member bonus when deleting
-            </label>
+            <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
+              Deleting a campaign automatically forfeits unused member bonuses.
+            </p>
             <button
               onClick={handleDelete}
-              disabled={!selectedCampaignId || loading}
+              disabled={!selectedCampaignId || loading || selectedIsDeleted}
               className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
             >
               <Trash2 className="h-4 w-4" />
@@ -1127,9 +1593,13 @@ export function CampaignsPanel({ token }: { token: string }) {
             </button>
           </div>
         </div>
+        )}
       </section>
+      )}
 
+      {(activeTab === "transactions" || activeTab === "wallet") && (
       <section className="grid gap-6 2xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] 2xl:gap-8">
+        {activeTab === "transactions" && (
         <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-4 flex flex-col gap-3">
             <div>
@@ -1141,19 +1611,11 @@ export function CampaignsPanel({ token }: { token: string }) {
             </div>
             <div className="grid min-w-0 gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-3">
               <input value={transactionUserId} onChange={(event) => setTransactionUserId(event.target.value)} placeholder="User ID" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
-              <select value={transactionType} onChange={(event) => setTransactionType(event.target.value as "all" | "credit" | "debit")} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm capitalize text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10">
-                <option value="all">All types</option>
-                <option value="credit">Credit</option>
-                <option value="debit">Debit</option>
-              </select>
-              <select value={transactionStatus} onChange={(event) => setTransactionStatus(event.target.value as "all" | "completed" | "failed")} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm capitalize text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10">
-                <option value="all">All statuses</option>
-                <option value="completed">Completed</option>
-                <option value="failed">Failed</option>
-              </select>
+              <CustomSelect value={transactionType} options={transactionTypeSelectOptions} onChange={setTransactionType} ariaLabel="Filter transactions by type" />
+              <CustomSelect value={transactionStatus} options={transactionStatusSelectOptions} onChange={setTransactionStatus} ariaLabel="Filter transactions by status" />
               <input value={transactionReference} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Reference" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
-              <input type="date" value={transactionFrom} onChange={(event) => setTransactionFrom(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" aria-label="Transaction created from" />
-              <input type="date" value={transactionTo} onChange={(event) => setTransactionTo(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" aria-label="Transaction created to" />
+              <input type="date" value={transactionFrom} onChange={(event) => setTransactionFrom(event.target.value)} className="custom-date min-h-11 text-sm" aria-label="Transaction created from" />
+              <input type="date" value={transactionTo} onChange={(event) => setTransactionTo(event.target.value)} className="custom-date min-h-11 text-sm" aria-label="Transaction created to" />
               <button onClick={() => loadTransactions(1)} disabled={loading} className="min-h-11 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50 sm:col-span-2 lg:col-span-1 lg:justify-self-end lg:px-8">
                 Load
               </button>
@@ -1230,7 +1692,9 @@ export function CampaignsPanel({ token }: { token: string }) {
           </div>
           <PageControls pagination={transactionPagination} onPageChange={(page) => loadTransactions(page)} disabled={loading} />
         </div>
+        )}
 
+        {activeTab === "wallet" && (
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-4 flex items-center gap-2">
             <BadgeDollarSign className="h-4 w-4 text-[#2f8f42]" />
@@ -1255,8 +1719,11 @@ export function CampaignsPanel({ token }: { token: string }) {
             Customer prompt: &ldquo;Your bonus credit does not cover the full amount. Use your paid wallet for the rest?&rdquo;
           </div>
         </div>
+        )}
       </section>
+      )}
 
+      {activeTab === "wallet" && (
       <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex items-center gap-2">
           <Wallet className="h-4 w-4 text-[#2f8f42]" />
@@ -1313,6 +1780,7 @@ export function CampaignsPanel({ token }: { token: string }) {
           </table>
         </div>
       </section>
+      )}
     </div>
   );
 }

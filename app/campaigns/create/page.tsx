@@ -15,18 +15,21 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  Moon,
   Plus,
   Settings,
+  Sun,
   UserCircle,
 } from "lucide-react";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
-import { createCampaign } from "@/lib/api";
+import { createCampaign, listCampaignServices, type CampaignService } from "@/lib/api";
 import {
   clearAdminSession,
   getStoredAdminSession,
   storeAdminSession,
   type AdminSession,
 } from "@/lib/adminSession";
+import { applyTheme, getInitialTheme, type ThemeMode } from "@/lib/theme";
 
 type Notice = {
   tone: "success" | "error";
@@ -53,12 +56,33 @@ export default function CreateCampaignPage() {
   const [description, setDescription] = useState("");
   const [budgetCap, setBudgetCap] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [services, setServices] = useState<CampaignService[]>([]);
+  const [allowedTools, setAllowedTools] = useState<string[]>([]);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
 
   useEffect(() => {
     const savedSession = getStoredAdminSession();
     if (savedSession) setAdminSession(savedSession);
     setAuthReady(true);
   }, []);
+
+  useEffect(() => {
+    applyTheme(themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (!adminSession?.token) return;
+    void listCampaignServices(adminSession.token)
+      .then((res) => {
+        const liveServices = res.data.services || [];
+        setServices(liveServices);
+        setAllowedTools(liveServices.filter((service) => service.live).map((service) => service.id));
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : "Could not load campaign services.";
+        setNotice({ tone: "error", text: message });
+      });
+  }, [adminSession?.token]);
 
   const handleBack = () => {
     router.push("/?view=campaigns");
@@ -92,7 +116,7 @@ export default function CreateCampaignPage() {
         {
           name: name.trim(),
           description: description.trim(),
-          allowedTools: ["cv_optimization"],
+          allowedTools,
           budgetCap: budgetCap ? Number(budgetCap) : null,
           expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
         },
@@ -109,7 +133,7 @@ export default function CreateCampaignPage() {
 
   if (!authReady) {
     return (
-      <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)}>
+      <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}>
         <div className="grid min-h-[420px] place-items-center">
         <Loader2 className="h-6 w-6 animate-spin text-emerald-700" />
         </div>
@@ -119,7 +143,7 @@ export default function CreateCampaignPage() {
 
   if (!adminSession) {
     return (
-      <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} adminSession={adminSession} onLogout={handleLogout}>
+      <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} adminSession={adminSession} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}>
         <div className="mx-auto max-w-5xl">
           <button
             type="button"
@@ -136,7 +160,7 @@ export default function CreateCampaignPage() {
   }
 
   return (
-    <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} adminSession={adminSession} onLogout={handleLogout}>
+    <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} adminSession={adminSession} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}>
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex flex-col gap-4">
           <button
@@ -214,13 +238,40 @@ export default function CreateCampaignPage() {
                   value={expiresAt}
                   onChange={(event) => setExpiresAt(event.target.value)}
                   type="date"
-                  className="min-h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-950 outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
+                  className="custom-date min-h-11 text-sm font-normal"
                 />
               </label>
             </div>
 
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-              Covered service: <span className="font-medium text-slate-700">CV improvement</span>
+            <div className="grid gap-2 rounded-lg bg-slate-50 px-3 py-3">
+              <p className="text-sm font-medium text-slate-700">Allowed services</p>
+              {services.length ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {services.map((service) => (
+                    <label key={service.id} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={allowedTools.includes(service.id)}
+                        onChange={() =>
+                          setAllowedTools((current) =>
+                            current.includes(service.id)
+                              ? current.filter((tool) => tool !== service.id)
+                              : [...current, service.id]
+                          )
+                        }
+                        disabled={!service.live || loading}
+                        className="mt-0.5 h-4 w-4 accent-[#48C05C]"
+                      />
+                      <span>
+                        <span className="block font-medium text-slate-800">{service.label}</span>
+                        {service.description && <span className="block text-xs text-slate-500">{service.description}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No campaign services loaded.</p>
+              )}
             </div>
 
             <button
@@ -244,12 +295,16 @@ function DashboardChrome({
   onToggleSidebar,
   adminSession,
   onLogout,
+  themeMode,
+  onToggleTheme,
 }: {
   children: ReactNode;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   adminSession?: AdminSession | null;
   onLogout?: () => void;
+  themeMode: ThemeMode;
+  onToggleTheme: () => void;
 }) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
@@ -342,10 +397,23 @@ function DashboardChrome({
         </nav>
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 xl:px-8 2xl:px-10">
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Create Campaign</h1>
-            <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              Add a campaign without leaving the dashboard workspace.
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Create Campaign</h1>
+                <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                  Add a campaign without leaving the dashboard workspace.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                aria-label="Toggle theme"
+              >
+                {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                {themeMode === "dark" ? "Light" : "Dark"}
+              </button>
+            </div>
           </div>
         </header>
         <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 xl:px-8 2xl:px-10">
