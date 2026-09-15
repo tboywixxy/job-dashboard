@@ -1,4 +1,8 @@
 "use client";
+import { Skeleton } from "@/components/Skeleton";
+
+import { SidePanel } from "@/components/SidePanel";
+import { FilterBar } from "@/components/FilterBar";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -8,14 +12,12 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
-  Loader2,
   LogOut,
   Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
   Trash2,
-  X,
   Users,
   UserMinus,
   Wallet,
@@ -564,11 +566,12 @@ export function CampaignsPanel({ token }: { token: string }) {
   };
 
   const handleDelete = async () => {
-    if (!selectedCampaignId) return;
+    if (!selectedCampaignId || loading) return;
     if (selectedIsDeleted) {
       setNotice({ tone: "info", text: "Deleted campaigns do not offer delete or funding actions." });
       return;
     }
+    if (!window.confirm("Are you sure you want to delete this campaign? Unused member bonuses will be forfeited.")) return;
     setLoading(true);
     setNotice(null);
     try {
@@ -850,26 +853,14 @@ export function CampaignsPanel({ token }: { token: string }) {
 
   return (
     <div className="space-y-5 sm:space-y-6 lg:space-y-8">
-      {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
+      {notice && !editingCampaign && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
       {editingCampaign && (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/45 px-4 py-6">
-          <div className="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-auto rounded-xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
-              <div className="min-w-0">
-                <h3 className="text-base font-semibold text-slate-950">Edit Campaign</h3>
-                <p className="mt-1 truncate text-sm text-slate-500">{editingCampaign.code}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingCampaign(null)}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
-                aria-label="Close edit campaign dialog"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="grid gap-4 px-5 py-5">
+        <SidePanel open title="Edit campaign" description={editingCampaign.code} onClose={() => setEditingCampaign(null)} busy={loading} footer={<>
+          <button type="button" className="ui-button" disabled={loading} onClick={() => setEditingCampaign(null)}>Cancel</button>
+          <button type="button" className="ui-button ui-primary" disabled={loading} onClick={handleUpdateCampaign}>{loading ? <Skeleton label="Saving changes" className="h-4 w-24" /> : "Save changes"}</button>
+        </>}>
+          {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
+            <div className="grid gap-4">
               <label className="grid gap-1 text-sm font-medium text-slate-700">
                 Campaign name
                 <input
@@ -967,27 +958,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               </label>
             </div>
 
-            <div className="grid gap-2 border-t border-slate-100 px-5 py-4 sm:flex sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setEditingCampaign(null)}
-                disabled={loading}
-                className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleUpdateCampaign}
-                disabled={loading}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-50"
-              >
-                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Save changes
-              </button>
-            </div>
-          </div>
-        </div>
+        </SidePanel>
       )}
 
       <section className="relative overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -1007,15 +978,16 @@ export function CampaignsPanel({ token }: { token: string }) {
               disabled={loading}
               className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Refresh data
+              {!loading && <RefreshCw className="h-4 w-4" />}
+              {loading ? <Skeleton label="Refreshing data" className="h-4 w-24" /> : "Refresh data"}
             </button>
           </div>
         </div>
 
         <div className="px-4 py-2.5 sm:px-5">
           <div className="flex w-full flex-col gap-3">
-            <div className="grid w-full gap-2 rounded-lg bg-slate-50 p-2 sm:grid-cols-2 xl:grid-cols-4">
+            <FilterBar label="Campaign filters" summary={[nameFilter, statusFilter !== "all" ? statusFilter : "", createdFrom, createdTo, budgetMin && `Min ${budgetMin}`, budgetMax && `Max ${budgetMax}`, includeDeleted ? "Including deleted" : ""].filter(Boolean).join(" / ") || "All campaigns"}>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <input
                 value={nameFilter}
                 onChange={(event) => setNameFilter(event.target.value)}
@@ -1093,12 +1065,13 @@ export function CampaignsPanel({ token }: { token: string }) {
                 </button>
               </div>
             </div>
+            </FilterBar>
           </div>
         </div>
 
       </section>
 
-      <div className="sticky top-[57px] z-10 overflow-x-auto rounded-lg bg-slate-100/60 px-2 py-1.5 backdrop-blur lg:top-0 dark:bg-white/5">
+      <div className="sticky top-[65px] z-10 overflow-x-auto rounded-lg bg-slate-100/60 px-2 py-1.5 backdrop-blur lg:top-0 dark:bg-white/5">
         <div className="flex min-w-max items-center gap-1">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
@@ -1282,7 +1255,8 @@ export function CampaignsPanel({ token }: { token: string }) {
             </div>
             <p className="mt-1 text-sm text-slate-500">Server-side user filters support select-all funding without loading every page.</p>
           </div>
-          <div className="grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+          <FilterBar label="Find users" summary={[userSearch, userRole, userHasBonus !== "all" ? `Bonus: ${userHasBonus}` : ""].filter(Boolean).join(" / ") || "All users"}>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
             <input value={userRole} onChange={(event) => setUserRole(event.target.value)} placeholder="Role" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
             <CustomSelect value={userHasBonus} options={bonusSelectOptions} onChange={setUserHasBonus} ariaLabel="Filter users by bonus" />
@@ -1293,6 +1267,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               Select all filtered
             </button>
           </div>
+          </FilterBar>
           <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <span>
               {selectAllTotal !== null
@@ -1306,7 +1281,7 @@ export function CampaignsPanel({ token }: { token: string }) {
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="min-w-[820px] text-sm">
+          <table className="mobile-card-table min-w-[820px] text-sm">
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Select</th>
@@ -1327,17 +1302,17 @@ export function CampaignsPanel({ token }: { token: string }) {
                 const id = user.userId || user.id || "";
                 return (
                   <tr key={id || summary.primary}>
-                    <td className="px-4 py-3">
-                      <input type="checkbox" checked={Boolean(id && selectedUserIds.includes(id))} disabled={!id || loading} onChange={(event) => handleSelectVisibleUser(id, event.target.checked)} className="h-4 w-4 accent-[#48C05C]" />
+                    <td data-label="Select" className="px-4 py-3">
+                      <input aria-label={`Select ${summary.primary}`} type="checkbox" checked={Boolean(id && selectedUserIds.includes(id))} disabled={!id || loading} onChange={(event) => handleSelectVisibleUser(id, event.target.checked)} className="h-4 w-4 accent-[#48C05C]" />
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="User" className="px-4 py-3">
                       <p className="font-medium text-slate-950">{summary.primary}</p>
                       {summary.secondary && <p className="text-xs text-slate-400">{summary.secondary}</p>}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{user.role || "-"}</td>
-                    <td className="px-4 py-3 text-right text-slate-600">{currency(user.bonusBalance || 0)}</td>
-                    <td className="px-4 py-3 text-right text-slate-600">{(user.bonusCount || 0).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-slate-600">{dateText(user.createdAt)}</td>
+                    <td data-label="Role" className="px-4 py-3 text-slate-600">{user.role || "-"}</td>
+                    <td data-label="Bonus balance" className="px-4 py-3 text-right text-slate-600">{currency(user.bonusBalance || 0)}</td>
+                    <td data-label="Bonus count" className="px-4 py-3 text-right text-slate-600">{(user.bonusCount || 0).toLocaleString()}</td>
+                    <td data-label="Created" className="px-4 py-3 text-slate-600">{dateText(user.createdAt)}</td>
                   </tr>
                 );
               })}
@@ -1377,7 +1352,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                 Load members
               </button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {(["active", "paused", "ended"] as CampaignStatus[]).map((status) => (
                 <button
                   key={status}
@@ -1400,7 +1375,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Status</p>
-                <p className="text-sm font-semibold capitalize text-slate-950">{detailsLoading ? "Loading" : effectiveStatus(selectedCampaign)}</p>
+                <p className="text-sm font-semibold capitalize text-slate-950">{detailsLoading ? <Skeleton label="Loading campaign status" className="h-4 w-20" /> : effectiveStatus(selectedCampaign)}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Members</p>
@@ -1446,7 +1421,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                       </div>
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(member.status)}`}>{member.status}</span>
                     </div>
-                    <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                       <div><dt className="text-xs text-slate-500">Granted</dt><dd className="font-medium text-slate-800">{currency(member.granted)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Spent</dt><dd className="font-medium text-slate-800">{currency(member.spent)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Left</dt><dd className="font-medium text-slate-800">{currency(member.remaining)}</dd></div>
@@ -1609,7 +1584,8 @@ export function CampaignsPanel({ token }: { token: string }) {
               </div>
               <p className="mt-1 text-sm text-slate-500">Paginated transactions include the user summary from the backend.</p>
             </div>
-            <div className="grid min-w-0 gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-3">
+            <FilterBar label="Transaction filters" summary={[transactionUserId, transactionReference, transactionType !== "all" ? transactionType : "", transactionStatus !== "all" ? transactionStatus : "", transactionFrom, transactionTo].filter(Boolean).join(" / ") || "All transactions"}>
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <input value={transactionUserId} onChange={(event) => setTransactionUserId(event.target.value)} placeholder="User ID" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
               <CustomSelect value={transactionType} options={transactionTypeSelectOptions} onChange={setTransactionType} ariaLabel="Filter transactions by type" />
               <CustomSelect value={transactionStatus} options={transactionStatusSelectOptions} onChange={setTransactionStatus} ariaLabel="Filter transactions by status" />
@@ -1620,6 +1596,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                 Load
               </button>
             </div>
+            </FilterBar>
           </div>
 
           <div className="grid gap-3 md:hidden">
@@ -1637,7 +1614,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                       </div>
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(transaction.status)}`}>{transaction.status}</span>
                     </div>
-                    <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                    <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                       <div><dt className="text-xs text-slate-500">Amount</dt><dd className="font-medium text-slate-800">{currency(transaction.amount)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Type</dt><dd className="font-medium capitalize text-slate-800">{transaction.type}</dd></div>
                       <div><dt className="text-xs text-slate-500">Date</dt><dd className="font-medium text-slate-800">{dateText(transaction.createdAt)}</dd></div>
@@ -1701,7 +1678,7 @@ export function CampaignsPanel({ token }: { token: string }) {
             <h3 className="text-base font-semibold text-slate-950">Paid Wallet Backup</h3>
           </div>
           <p className="text-sm leading-6 text-slate-500">
-            Choose what should happen when a user's bonus credit is not enough to finish a CV improvement.
+            Choose what should happen when a user&apos;s bonus credit is not enough to finish a CV improvement.
           </p>
           <button onClick={loadBalance} disabled={loading} className="mt-5 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">
             Check wallet balance
@@ -1744,7 +1721,7 @@ export function CampaignsPanel({ token }: { token: string }) {
           </div>
         </div>
         <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
-          <table className="min-w-[720px] text-sm">
+          <table className="mobile-card-table min-w-[720px] text-sm">
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Bonus</th>
@@ -1762,11 +1739,11 @@ export function CampaignsPanel({ token }: { token: string }) {
               ) : (
                 bonusItems.map((item) => (
                   <tr key={item.bonusId}>
-                    <td className="px-4 py-3 text-slate-950">{item.bonusId}</td>
-                    <td className="px-4 py-3 text-right text-slate-600">{currency(item.remaining)}</td>
-                    <td className="px-4 py-3 text-slate-600">{dateText(item.expiresAt)}</td>
-                    <td className="px-4 py-3 text-slate-600">{item.allowedTools?.join(", ") || "All tools"}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="Bonus" className="px-4 py-3 text-slate-950">{item.bonusId}</td>
+                    <td data-label="Remaining" className="px-4 py-3 text-right text-slate-600">{currency(item.remaining)}</td>
+                    <td data-label="Expires" className="px-4 py-3 text-slate-600">{dateText(item.expiresAt)}</td>
+                    <td data-label="Tools" className="px-4 py-3 text-slate-600">{item.allowedTools?.join(", ") || "All tools"}</td>
+                    <td data-label="Campaign status" className="px-4 py-3">
                       {item.campaignStatus ? (
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(item.campaignStatus)}`}>
                           {item.campaignStatus}

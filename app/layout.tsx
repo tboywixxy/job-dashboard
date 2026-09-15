@@ -1,10 +1,11 @@
 // app/layout.tsx
 import type { Metadata } from "next";
+import { DailyDashboardFont } from "@/components/DailyDashboardFont";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Job Analytics Dashboard",
-  description: "Frontend Intern Technical Interview: Job Analytics Dashboard",
+  title: "Mastaskillz | Admin Workspace",
+  description: "Mastaskillz analytics, campaigns, and community feedback.",
 };
 
 export default function RootLayout({
@@ -20,7 +21,7 @@ export default function RootLayout({
             __html: `
               try {
                 var theme = localStorage.getItem("dashboard-theme");
-                if (!theme) theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+                if (!theme) theme = "light";
                 document.documentElement.classList.toggle("dark", theme === "dark");
               } catch {}
             `,
@@ -28,6 +29,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen">
+        <DailyDashboardFont />
         {children}
       </body>
     </html>

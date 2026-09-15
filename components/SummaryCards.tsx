@@ -45,9 +45,10 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
             key={key}
             type="button"
             onClick={() => onSelectRange(key)}
-            className={`group rounded-xl border bg-white p-4 text-left shadow-sm transition ${
+            aria-pressed={isActive}
+            className={`summary-card group rounded-xl border bg-white p-4 text-left shadow-sm transition ${
               isActive
-                ? "border-[#48C05C] ring-4 ring-[#48C05C]/10"
+                ? "summary-card-active border-[#48C05C]"
                 : "border-slate-200 hover:border-[#48C05C]/40 hover:shadow-md"
             }`}
           >

@@ -274,7 +274,7 @@ async function fetchAuthJson<T>(
       credentials: "include",
     });
   } catch {
-    throw new Error("Could not reach the campaign service. Please try again.");
+    throw new Error("Could not reach the admin service. Please try again.");
   }
 
   const body = (await res.json().catch(() => ({}))) as T & {
@@ -282,7 +282,7 @@ async function fetchAuthJson<T>(
     code?: number;
   };
 
-  if (!res.ok || (body.code && body.code >= 400)) {
+  if (!res.ok || (body.code && body.code >= 400) || (body as { success?: boolean }).success === false || (body as { status?: string }).status === "Error") {
     const message =
       res.status === 402 || body.code === 402
         ? "Paid wallet approval is needed before this charge can continue."
@@ -698,4 +698,91 @@ export async function setBillingConsent(
     token,
     body: JSON.stringify({ autoBillWalletWhenBonusLow }),
   });
+}
+
+export type Feedback = {
+  id: string;
+  userId?: string;
+  user?: UserSummary | null;
+  rating?: number | null;
+  comment?: string | null;
+  source: string;
+  jobKind?: string | null;
+  jobKinds?: string[];
+  selections?: string[];
+  updatedAt?: string;
+  createdAt: string;
+  deletedAt?: string | null;
+  isDeleted?: boolean;
+};
+export type FeedbackFilters = {
+  source?: string;
+  ratingMin?: string;
+  ratingMax?: string;
+  hasComment?: string;
+  jobKind?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  includeDeleted?: boolean;
+  page?: number;
+  limit?: number;
+};
+export type FeedbackStats = {
+  totalFeedback: number;
+  averageRating: number | null;
+  bySource: { source: string; count: number }[];
+};
+
+function feedbackQuery(filters: FeedbackFilters) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  return params.toString();
+}
+
+// Keep response-envelope adaptation at the API boundary.
+function feedbackData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") throw new Error("Unexpected feedback response.");
+  const body = value as Record<string, unknown>;
+  return (body.data ?? body) as Record<string, unknown>;
+}
+export async function listFeedback(filters: FeedbackFilters, token: string, signal?: AbortSignal) {
+  const body = feedbackData(await fetchAuthJson<unknown>(`/admin/feedback?${feedbackQuery(filters)}`, { token, signal }));
+  const rows = body.feedback ?? body.feedbacks ?? body.items;
+  const pagination = body.pagination as Pagination | undefined;
+  if (!Array.isArray(rows) || !pagination || !Number.isFinite(pagination.total)) {
+    throw new Error("Unexpected feedback response. Please try again.");
+  }
+  return {
+    feedback: rows.map((row) => ({ ...row, id: row.id ?? row._id })) as Feedback[],
+    pagination,
+  };
+}
+export async function getFeedbackStats(filters: Pick<FeedbackFilters, "source" | "createdFrom" | "createdTo">, token: string, signal?: AbortSignal): Promise<FeedbackStats> {
+  const body = feedbackData(await fetchAuthJson<unknown>(`/admin/feedback/stats?${feedbackQuery(filters)}`, { token, signal }));
+  const stats = (body.stats ?? body) as Record<string, unknown>;
+  const total = stats.totalFeedback ?? stats.total;
+  const average = stats.averageRating ?? stats.avgRating;
+  const counts = stats.bySource ?? stats.countsBySource;
+  if (typeof total !== "number" || !counts || typeof counts !== "object") throw new Error("Unexpected feedback statistics response.");
+  const bySource = Array.isArray(counts)
+    ? counts.map((item) => ({ source: String(item.source ?? item._id), count: Number(item.count) }))
+    : Object.entries(counts).map(([source, count]) => ({ source, count: Number(count) }));
+  return { totalFeedback: total, averageRating: average == null ? null : Number(average), bySource };
+}
+export type FeedbackSource = { id: string; label: string };
+
+export async function getFeedbackSources(token: string, signal?: AbortSignal): Promise<FeedbackSource[]> {
+  const body = feedbackData(await fetchAuthJson<unknown>("/admin/feedback/sources", { token, signal }));
+  const sources = Array.isArray(body) ? body : body.sources;
+  if (!Array.isArray(sources) || !sources.every((source): source is FeedbackSource =>
+    source !== null && typeof source === "object" &&
+    typeof source.id === "string" && source.id.trim().length > 0 &&
+    typeof source.label === "string" && source.label.trim().length > 0
+  )) throw new Error("Unexpected feedback sources response.");
+  return Array.from(new Map(sources.map((source) => [source.id, source])).values());
+}
+export async function deleteFeedback(id: string, token: string) {
+  return fetchAuthJson<unknown>(`/admin/feedback/${encodeURIComponent(id)}`, { method: "DELETE", token });
 }

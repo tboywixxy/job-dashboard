@@ -1,7 +1,9 @@
 "use client";
+import { Skeleton, WorkspaceSkeleton } from "@/components/Skeleton";
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { MobileNavigation } from "@/components/MobileNavigation";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -11,16 +13,14 @@ import {
   Clock3,
   Gift,
   LayoutDashboard,
-  Loader2,
-  LogIn,
   LogOut,
   MapPin,
   Moon,
   Plus,
-  Settings,
   Sun,
   UserCircle,
 } from "lucide-react";
+import { ToastNotice } from "@/components/ToastNotice";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
 import { createCampaign, listCampaignServices, type CampaignService } from "@/lib/api";
 import {
@@ -42,7 +42,6 @@ const navItems = [
   { href: "/?view=reports", icon: BarChart3, label: "Reports", active: false },
   { href: "/?view=locations", icon: MapPin, label: "Locations", active: false },
   { href: "/?view=timeline", icon: Clock3, label: "Timeline", active: false },
-  { href: "/?view=settings", icon: Settings, label: "Settings", active: false },
 ];
 
 export default function CreateCampaignPage() {
@@ -95,6 +94,7 @@ export default function CreateCampaignPage() {
   };
 
   const handleLogout = () => {
+    if (!window.confirm("Are you sure you want to log out?")) return;
     clearAdminSession();
     setAdminSession(null);
     setNotice(null);
@@ -131,33 +131,8 @@ export default function CreateCampaignPage() {
     }
   };
 
-  if (!authReady) {
-    return (
-      <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}>
-        <div className="grid min-h-[420px] place-items-center">
-        <Loader2 className="h-6 w-6 animate-spin text-emerald-700" />
-        </div>
-      </DashboardChrome>
-    );
-  }
-
-  if (!adminSession) {
-    return (
-      <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} adminSession={adminSession} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}>
-        <div className="mx-auto max-w-5xl">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="mb-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </button>
-          <AdminLoginForm onAuthenticated={handleAuthenticated} />
-        </div>
-      </DashboardChrome>
-    );
-  }
+  if (!authReady) return <WorkspaceSkeleton />;
+  if (!adminSession) return <main className="login-screen"><AdminLoginForm onAuthenticated={handleAuthenticated} /></main>;
 
   return (
     <DashboardChrome sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} adminSession={adminSession} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}>
@@ -185,17 +160,7 @@ export default function CreateCampaignPage() {
         </div>
 
         <form onSubmit={handleCreate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          {notice && (
-            <div
-              className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
-                notice.tone === "error"
-                  ? "border-red-200 bg-red-50 text-red-700"
-                  : "border-[#48C05C]/30 bg-[#48C05C]/10 text-[#2f8f42]"
-              }`}
-            >
-              {notice.text}
-            </div>
-          )}
+          {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
 
           <div className="grid gap-4">
             <label className="grid gap-1 text-sm font-medium text-slate-700">
@@ -279,8 +244,8 @@ export default function CreateCampaignPage() {
               disabled={loading}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-60"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              {loading ? "Creating" : "Create campaign"}
+              {!loading && <Plus className="h-4 w-4" />}
+              {loading ? <Skeleton label="Creating campaign" className="h-4 w-28" /> : "Create campaign"}
             </button>
           </div>
         </form>
@@ -307,10 +272,11 @@ function DashboardChrome({
   onToggleTheme: () => void;
 }) {
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-72"}`}>
+    <main className="admin-workspace min-h-screen bg-[#f5f7fb] text-slate-950">
+      <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-64"}`}>
         <div className={`border-b border-white/15 py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
-          <div className={`flex ${sidebarCollapsed ? "justify-center" : "justify-end"}`}>
+          <div className={`flex items-center gap-2 ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
+            {!sidebarCollapsed && <Link href="/" className="brand-lockup"><span className="brand-mark">M</span><span>Mastaskillz<small>ADMIN WORKSPACE</small></span></Link>}
             <button
               type="button"
               onClick={onToggleSidebar}
@@ -327,6 +293,7 @@ function DashboardChrome({
               key={item.label}
               href={item.href}
               title={sidebarCollapsed ? item.label : undefined}
+              aria-current={item.active ? "page" : undefined}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${item.active ? "bg-white text-[#48C05C] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"} ${sidebarCollapsed ? "justify-center" : ""}`}
             >
               <item.icon className="h-4 w-4" />
@@ -334,67 +301,14 @@ function DashboardChrome({
             </Link>
           ))}
         </nav>
-        <div className="border-t border-white/15 px-4 py-4 text-sm">
-          {adminSession ? (
-            <div className={`flex items-center gap-3 rounded-lg bg-white/10 px-3 py-2.5 ${sidebarCollapsed ? "justify-center" : ""}`}>
-              <UserCircle className="h-5 w-5 shrink-0 text-white" />
-              {!sidebarCollapsed && (
-                <>
-                  <span className="min-w-0 flex-1 truncate font-medium" title={adminSession.displayName}>
-                    {adminSession.displayName}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={onLogout}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/80 transition hover:bg-white/15 hover:text-white"
-                    aria-label="Sign out"
-                    title="Sign out"
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className={`flex items-center gap-3 rounded-lg bg-white/10 px-3 py-2.5 ${sidebarCollapsed ? "justify-center" : ""}`}>
-              <LogIn className="h-5 w-5 shrink-0 text-white" />
-              {!sidebarCollapsed && <span className="font-medium">Login</span>}
-            </div>
-          )}
+        <div className={`sidebar-account border-t p-3 ${sidebarCollapsed ? "is-collapsed" : ""}`}>
+          {!sidebarCollapsed && <div className="mb-3 flex items-center gap-3 px-2"><UserCircle size={25} /><span className="truncate text-sm">{adminSession?.displayName}</span></div>}
+          <button type="button" onClick={onLogout} className="ui-button logout-button"><LogOut size={16} /><span>Logout</span></button>
         </div>
       </aside>
 
-      <div className={`min-w-0 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-20" : "lg:ml-72"}`}>
-        <nav className="sticky top-0 z-20 flex gap-2 overflow-x-auto border-b border-[#0f3d20] bg-[#14532d] px-3 py-2 text-white shadow-sm lg:hidden" aria-label="Dashboard navigation">
-          {adminSession ? navItems.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              aria-current={item.active ? "page" : undefined}
-              className={`flex min-w-[5.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[11px] font-medium transition ${
-                item.active ? "bg-white text-[#2f8f42] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"
-              }`}
-            >
-              <item.icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </Link>
-          )) : (
-            <div className="flex min-w-[5.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg bg-white px-3 py-2 text-[11px] font-medium text-[#2f8f42] shadow-sm">
-              <LogIn className="h-4 w-4" />
-              <span>Login</span>
-            </div>
-          )}
-          {adminSession && (
-            <button
-              type="button"
-              onClick={onLogout}
-              className="flex min-w-[5.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[11px] font-medium text-white/80 transition hover:bg-white/15 hover:text-white"
-            >
-              <UserCircle className="h-4 w-4" />
-              <span className="max-w-20 truncate">{adminSession.displayName}</span>
-            </button>
-          )}
-        </nav>
+      <div className={`min-w-0 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-20" : "lg:ml-64"}`}>
+        <MobileNavigation items={navItems} onLogout={onLogout} themeMode={themeMode} onToggleTheme={onToggleTheme} />
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 xl:px-8 2xl:px-10">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -407,7 +321,7 @@ function DashboardChrome({
               <button
                 type="button"
                 onClick={onToggleTheme}
-                className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                className="desktop-theme-toggle inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
                 aria-label="Toggle theme"
               >
                 {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}

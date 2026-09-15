@@ -107,9 +107,10 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
         </div>
       </div>
 
+      <div className="mb-3 flex flex-wrap gap-2 md:hidden" aria-label="Sort jobs"><button type="button" className="ui-button" onClick={() => handleSort("clicks")}>Clicks {sortKey === "clicks" ? (sortDirection === "desc" ? "?" : "?") : ""}</button><button type="button" className="ui-button" onClick={() => handleSort("location")}>Location {sortKey === "location" ? (sortDirection === "desc" ? "?" : "?") : ""}</button></div>
       <div className="overflow-hidden rounded-lg border border-slate-200">
-        <div className="max-h-96 overflow-auto">
-          <table className="min-w-full text-sm">
+        <div className="jobs-list-scroll max-h-96 overflow-auto">
+          <table className="mobile-card-table min-w-full text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -157,7 +158,7 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
               ) : (
                 sortedJobs.map((job) => (
                   <tr key={job.shortCode} className="transition hover:bg-slate-50">
-                    <td className="px-4 py-3 align-top">
+                    <td data-label="Job" className="px-4 py-3 align-top">
                       <div className="min-w-56">
                         <span className="font-medium text-slate-950">{job.jobTitle}</span>
                         <span className="mt-1 block text-xs text-slate-400">
@@ -166,25 +167,25 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
                       </div>
                     </td>
 
-                    <td className="px-4 py-3 align-top text-slate-600">
+                    <td data-label="Location" className="px-4 py-3 align-top text-slate-600">
                       {job.location || "-"}
                     </td>
 
-                    <td className="px-4 py-3 align-top text-right">
+                    <td data-label="Clicks" className="px-4 py-3 align-top text-right">
                       <span className="inline-flex rounded-full bg-[#48C05C]/10 px-2.5 py-1 text-xs font-semibold text-[#2f8f42]">
                         {job.clicks.toLocaleString()}
                       </span>
                     </td>
 
-                    <td className="px-4 py-3 align-top text-xs text-slate-500">
+                    <td data-label="First click" className="px-4 py-3 align-top text-xs text-slate-500">
                       {fmtLocal(job.firstClickAt)}
                     </td>
 
-                    <td className="px-4 py-3 align-top text-xs text-slate-500">
+                    <td data-label="Last click" className="px-4 py-3 align-top text-xs text-slate-500">
                       {fmtLocal(job.lastClickAt)}
                     </td>
 
-                    <td className="px-4 py-3 align-top text-right">
+                    <td data-label="Actions" className="px-4 py-3 align-top text-right">
                       <div className="inline-flex gap-2">
                         <button
                           onClick={() => handleViewJob(job.originalUrl)}

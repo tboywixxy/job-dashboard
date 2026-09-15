@@ -64,7 +64,7 @@ export function ExpandableTableModal({
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
-      <section className="relative flex max-h-[92vh] w-full max-w-[96rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
+      <section className="expanded-table-dialog relative flex max-h-[92dvh] w-full max-w-[96rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
           <div>
             <h2 className="text-lg font-semibold text-slate-950">{title}</h2>

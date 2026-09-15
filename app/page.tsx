@@ -1,6 +1,11 @@
 "use client";
+import { Skeleton, WorkspaceSkeleton } from "@/components/Skeleton";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { MobileNavigation } from "@/components/MobileNavigation";
+import { FilterBar } from "@/components/FilterBar";
+import { ToastNotice } from "@/components/ToastNotice";
 import {
   BarChart3,
   ChevronLeft,
@@ -8,16 +13,15 @@ import {
   Clock3,
   Gift,
   LayoutDashboard,
-  Loader2,
-  LogIn,
   LogOut,
   MapPin,
   Moon,
+  MessageSquare,
   RefreshCw,
-  Settings,
   Sun,
   UserCircle,
 } from "lucide-react";
+import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
 import { CampaignsPanel } from "@/components/CampaignsPanel";
 import { JobCategoryChart } from "@/components/JobCategoryChart";
@@ -44,7 +48,7 @@ import {
 import { applyTheme, getInitialTheme, type ThemeMode } from "@/lib/theme";
 
 type SelectedRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
-type ActiveView = "dashboard" | "campaigns" | "reports" | "locations" | "timeline" | "settings";
+type ActiveView = "dashboard" | "campaigns" | "reports" | "locations" | "timeline" | "feedback";
 
 const rangeLabels: Record<SelectedRange, string> = {
   today: "Today",
@@ -126,13 +130,18 @@ export default function Page() {
   useEffect(() => {
     if (!adminSession) return;
     const view = new URLSearchParams(window.location.search).get("view");
+    if (view === "settings") {
+      setActiveView("dashboard");
+      window.history.replaceState(null, "", "/?view=dashboard");
+      return;
+    }
     if (
       view === "dashboard" ||
       view === "campaigns" ||
       view === "reports" ||
       view === "locations" ||
       view === "timeline" ||
-      view === "settings"
+      view === "feedback"
     ) {
       setActiveView(view);
     }
@@ -149,6 +158,7 @@ export default function Page() {
   };
 
   const handleLogout = () => {
+    if (!window.confirm("Are you sure you want to log out?")) return;
     clearAdminSession();
     setAdminSession(null);
     setActiveView("dashboard");
@@ -263,129 +273,75 @@ export default function Page() {
     { view: "reports" as const, icon: BarChart3, label: "Reports" },
     { view: "locations" as const, icon: MapPin, label: "Locations" },
     { view: "timeline" as const, icon: Clock3, label: "Timeline" },
-    { view: "settings" as const, icon: Settings, label: "Settings" },
+    { view: "feedback" as const, icon: MessageSquare, label: "Feedback" },
   ];
 
   const pageTitle =
+    activeView === "feedback" ? "Admin Feedback" :
     activeView === "campaigns" ? "Campaigns & Bonus Credits" :
     activeView === "reports" ? "Reports" :
     activeView === "locations" ? "Location Analytics" :
     activeView === "timeline" ? "Timeline" :
-    activeView === "settings" ? "Settings" : "Job Analytics Dashboard";
+    "Dashboard overview";
 
   const pageDescription =
+    activeView === "feedback" ? "Listen to your community. Review ratings, explore feedback, and understand what matters." :
     activeView === "campaigns" ? "Create campaigns, fund existing users, reclaim unused bonus credit, and manage paid wallet backup." :
     activeView === "reports" ? "Review campaign and job performance reports from the dashboard workspace." :
     activeView === "locations" ? "Track where job demand and campaign activity are coming from." :
     activeView === "timeline" ? "Inspect daily click movement and timestamp-led engagement patterns." :
-    activeView === "settings" ? "Manage dashboard preferences and integration access." :
     "Monitor job clicks, high-performing roles, location demand, and timestamp insights.";
 
+  if (!authReady) return <WorkspaceSkeleton />;
+  if (!adminSession) return <main className="login-screen"><AdminLoginForm onAuthenticated={handleAuthenticated} /></main>;
+
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-72"}`}>
+    <main className="admin-workspace min-h-screen bg-[#f5f7fb] text-slate-950">
+      <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-64"}`}>
         <div className={`border-b border-white/15 py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
-          <div className={`flex ${sidebarCollapsed ? "justify-center" : "justify-end"}`}>
+          <div className={`flex items-center gap-2 ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
+            {!sidebarCollapsed && <Link href="/" className="brand-lockup"><span className="brand-mark">M</span><span>Mastaskillz<small>ADMIN WORKSPACE</small></span></Link>}
             <button type="button" onClick={() => setSidebarCollapsed((value) => !value)} className="grid h-8 w-8 place-items-center rounded-lg border border-white/20 text-white/85 transition hover:bg-white/15" title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
         </div>
-        <nav className="flex-1 space-y-1 px-4 py-5 text-sm">
+        <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-4 py-5 text-sm">
+          {!sidebarCollapsed && <p className="nav-section-label">Workspace</p>}
           {(adminSession ? navItems : []).map((item) => {
             const isActive = activeView === item.view;
             return (
-              <button key={item.label} type="button" onClick={() => setActiveView(item.view)} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${isActive ? "bg-white text-[#48C05C] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"} ${sidebarCollapsed ? "justify-center" : ""}`}>
+              <button key={item.label} type="button" onClick={() => { setActiveView(item.view); window.history.replaceState(null, "", `/?view=${item.view}`); }} aria-current={activeView === item.view ? "page" : undefined} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${isActive ? "bg-white text-[#48C05C] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"} ${sidebarCollapsed ? "justify-center" : ""}`}>
                 <item.icon className="h-4 w-4" />
                 {!sidebarCollapsed && <span className="font-medium">{item.label}</span>}
               </button>
             );
           })}
         </nav>
-        <div className="border-t border-white/15 px-4 py-4 text-sm">
-          {adminSession ? (
-            <div className={`flex items-center gap-3 rounded-lg bg-white/10 px-3 py-2.5 ${sidebarCollapsed ? "justify-center" : ""}`}>
-              <UserCircle className="h-5 w-5 shrink-0 text-white" />
-              {!sidebarCollapsed && (
-                <>
-                  <span className="min-w-0 flex-1 truncate font-medium" title={adminSession.displayName}>
-                    {adminSession.displayName}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/80 transition hover:bg-white/15 hover:text-white"
-                    aria-label="Sign out"
-                    title="Sign out"
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className={`flex items-center gap-3 rounded-lg bg-white/10 px-3 py-2.5 ${sidebarCollapsed ? "justify-center" : ""}`}>
-              <LogIn className="h-5 w-5 shrink-0 text-white" />
-              {!sidebarCollapsed && <span className="font-medium">Login</span>}
-            </div>
-          )}
+        <div className={`sidebar-account border-t p-3 ${sidebarCollapsed ? "is-collapsed" : ""}`}>
+          {!sidebarCollapsed && <div className="mb-3 flex min-w-0 items-center gap-3 px-2"><UserCircle size={25} /><div className="min-w-0"><p className="truncate text-sm font-medium">{adminSession.displayName}</p><p className="text-xs text-slate-500">Administrator</p></div></div>}
+          <button type="button" onClick={handleLogout} className="ui-button logout-button"><LogOut size={16} /><span>Logout</span></button>
         </div>
       </aside>
 
-      <div className={`min-w-0 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-20" : "lg:ml-72"}`}>
-      <nav className="sticky top-0 z-20 flex gap-2 overflow-x-auto border-b border-[#0f3d20] bg-[#14532d] px-3 py-2 text-white shadow-sm lg:hidden" aria-label="Dashboard navigation">
-        {adminSession ? navItems.map((item) => {
-          const isActive = activeView === item.view;
-          return (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => setActiveView(item.view)}
-              aria-current={isActive ? "page" : undefined}
-              className={`flex min-w-[5.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[11px] font-medium transition ${
-                isActive ? "bg-white text-[#2f8f42] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"
-              }`}
-            >
-              <item.icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </button>
-          );
-        }) : (
-          <button
-            type="button"
-            aria-current="page"
-            className="flex min-w-[5.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg bg-white px-3 py-2 text-[11px] font-medium text-[#2f8f42] shadow-sm"
-          >
-            <LogIn className="h-4 w-4" />
-            <span>Login</span>
-          </button>
-        )}
-        {adminSession && (
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex min-w-[5.25rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[11px] font-medium text-white/80 transition hover:bg-white/15 hover:text-white"
-          >
-            <UserCircle className="h-4 w-4" />
-            <span className="max-w-20 truncate">{adminSession.displayName}</span>
-          </button>
-        )}
-      </nav>
-      <header className="border-b border-slate-200 bg-white">
+      <div className={`min-w-0 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-20" : "lg:ml-64"}`}>
+      <MobileNavigation items={navItems.map((item) => ({ ...item, href: `/?view=${item.view}`, active: activeView === item.view }))} onNavigate={(href) => { const view = new URLSearchParams(href.split("?")[1]).get("view") as ActiveView; setActiveView(view); window.history.replaceState(null, "", href); }} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => mode === "dark" ? "light" : "dark")} />
+      <header className="admin-header border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 xl:px-8 2xl:px-10">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
+              <p className="eyebrow mb-2">Mastaskillz <span className="mx-2 opacity-40">/</span> Workspace</p>
               <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                {pageTitle}
+                {adminSession ? pageTitle : "Welcome to Mastaskillz"}
               </h1>
               <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                {pageDescription}
+                {adminSession ? pageDescription : "Sign in to manage your workspace."}
               </p>
             </div>
             <button
               type="button"
               onClick={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
-              className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+              className="ui-button desktop-theme-toggle"
               aria-label="Toggle theme"
             >
               {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -394,14 +350,8 @@ export default function Page() {
           </div>
 
           {adminSession && activeView === "dashboard" && (
-            <label className="mt-4 flex w-fit items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 select-none">
-              <input type="checkbox" checked={includeTimestamps} onChange={(event) => setIncludeTimestamps(event.target.checked)} className="h-4 w-4 accent-[#48C05C]" />
-              Include timestamps
-            </label>
-          )}
-
-          {adminSession && activeView === "dashboard" && (
-          <section className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 lg:grid-cols-[1fr_auto] lg:items-end">
+          <div className="mt-5"><FilterBar label="Date & display" summary={`${activeRangeLabel}${includeTimestamps ? " / Timestamps included" : ""}`}>
+          <section className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
                 Start date
@@ -430,8 +380,8 @@ export default function Page() {
                 disabled={rangeLoading}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <RefreshCw className={`h-4 w-4 ${rangeLoading ? "animate-spin" : ""}`} />
-                {rangeLoading ? "Applying" : "Apply range"}
+                {!rangeLoading && <RefreshCw className="h-4 w-4" />}
+                {rangeLoading ? <Skeleton label="Applying range" className="h-4 w-20" /> : "Apply range"}
               </button>
               {usingRange && (
                 <button type="button" onClick={handleClearRange} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
@@ -440,6 +390,8 @@ export default function Page() {
               )}
             </div>
           </section>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={includeTimestamps} onChange={(event) => setIncludeTimestamps(event.target.checked)} className="h-4 w-4 accent-green-600" />Include timestamps</label>
+          </FilterBar></div>
           )}
         </div>
       </header>
@@ -447,7 +399,7 @@ export default function Page() {
       <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 xl:px-8 2xl:px-10">
         {!authReady && (
           <div className="grid min-h-[420px] place-items-center">
-            <Loader2 className="h-6 w-6 animate-spin text-emerald-700" />
+            <Skeleton label="Loading workspace" className="h-40 w-full" />
           </div>
         )}
 
@@ -455,21 +407,12 @@ export default function Page() {
 
         {authReady && adminSession && (
           <>
-        {activeView === "dashboard" && (rangeError || loadError) && (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            <span>{rangeError ?? loadError}</span>
-            {loadError && (
-              <button type="button" onClick={() => void loadAnalytics()} className="font-semibold underline">
-                Retry
-              </button>
-            )}
-          </div>
-        )}
+        {rangeError && <ToastNotice tone="error" text={rangeError} onClose={() => setRangeError(null)} />}
+        {loadError && <ToastNotice tone="error" text={loadError} index={rangeError ? 1 : 0} onClose={() => setLoadError(null)} />}
+        {!loading && !summary && activeView !== "campaigns" && activeView !== "feedback" && <div className="surface p-8 text-center"><p className="mb-3 text-sm text-slate-500">Analytics are unavailable.</p><button className="ui-button" onClick={() => void loadAnalytics()}>Retry analytics</button></div>}
 
         {activeView === "dashboard" && (loading ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
-            Loading analytics...
-          </div>
+          <div role="status" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><span className="sr-only">Loading analytics</span>{[1,2,3,4].map((item) => <Skeleton key={item} className="h-40 w-full" />)}</div>
         ) : summary ? (
           <div className="space-y-6">
             <SummaryCards
@@ -514,6 +457,8 @@ export default function Page() {
           </div>
         ) : null)}
 
+        {activeView === "feedback" && <FeedbackPanel token={adminSession.token} />}
+
         {activeView === "campaigns" && <CampaignsPanel token={adminSession.token} />}
 
         {activeView === "reports" && (
@@ -537,16 +482,7 @@ export default function Page() {
 
         {activeView === "timeline" && <TrendChart data={trendData} selectedRange={selectedRange} totalClicks={totalClicks} />}
 
-        {activeView === "settings" && (
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold">Integration Settings</h2>
-            <p className="mt-1 text-sm text-slate-500">Campaign tools connect to the Mastaskillz admin service and require an active admin session.</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg bg-slate-50 p-4"><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Covered service</p><p className="mt-2 font-semibold">CV improvement</p></div>
-              <div className="rounded-lg bg-slate-50 p-4"><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Paid wallet backup</p><p className="mt-2 font-semibold">User controlled</p></div>
-            </div>
-          </section>
-        )}
+
           </>
         )}
       </div>

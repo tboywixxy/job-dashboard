@@ -98,7 +98,7 @@ export const JobDetailsModal: React.FC<Props> = ({ open, onClose, job }) => {
         className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
       />
 
-      <div className="absolute left-1/2 top-1/2 max-h-[90vh] w-[95vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-950 shadow-2xl">
+      <div className="job-details-dialog absolute left-1/2 top-1/2 max-h-[90dvh] w-[95vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-950 shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold text-slate-950">
@@ -117,7 +117,7 @@ export const JobDetailsModal: React.FC<Props> = ({ open, onClose, job }) => {
           </button>
         </div>
 
-        <div className="max-h-[calc(90vh-74px)] space-y-4 overflow-auto p-5">
+        <div className="max-h-[calc(90dvh-74px)] space-y-4 overflow-auto p-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">

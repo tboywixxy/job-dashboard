@@ -60,11 +60,11 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   const subtitle = formatSubtitle(selectedRange, totalClicks);
 
   const renderTable = (inModal = false) => data.length === 0 ? (
-    <div className={`grid place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 ${inModal ? "h-72" : "h-56"}`}>
+    <div className={`grid place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500 ${inModal ? "h-72" : "min-h-0 flex-1"}`}>
       No engagement data to show.
     </div>
   ) : (
-    <div className={`${inModal ? "max-h-[68vh]" : "max-h-56"} overflow-auto rounded-lg border border-slate-200`}>
+    <div className={`${inModal ? "max-h-[68vh]" : "min-h-0 flex-1"} overflow-auto rounded-lg border border-slate-200`}>
       <table className="w-full border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
           <tr>
@@ -87,8 +87,8 @@ export const TrendChart: React.FC<TrendChartProps> = ({
   );
 
   return (
-    <section className="h-80 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <section className="flex h-80 min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-slate-950">Engagement Activity - {titleLabel}</h2>
           <p className="text-sm text-slate-500">{subtitle}</p>
