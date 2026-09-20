@@ -1,5 +1,6 @@
 export type AdminSession = {
   token: string;
+  refreshToken?: string;
   email: string;
   displayName: string;
   role: "job_seeker" | "employer";
@@ -7,8 +8,10 @@ export type AdminSession = {
 
 export const ADMIN_SESSION_STORAGE_KEY = "mastaskillz_admin_session";
 export const ADMIN_TOKEN_STORAGE_KEY = "mastaskillz_admin_token";
+export const ADMIN_SESSION_EVENT = "mastaskillz-admin-session";
 
 export function getStoredAdminSession(): AdminSession | null {
+  if (typeof window === "undefined") return null;
   const sessionValue = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
   if (sessionValue) {
     try {
@@ -35,9 +38,11 @@ export function getStoredAdminSession(): AdminSession | null {
 export function storeAdminSession(session: AdminSession) {
   window.localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(session));
   window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, session.token);
+  window.dispatchEvent(new Event(ADMIN_SESSION_EVENT));
 }
 
 export function clearAdminSession() {
   window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
   window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+  window.dispatchEvent(new Event(ADMIN_SESSION_EVENT));
 }

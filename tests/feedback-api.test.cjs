@@ -8,7 +8,7 @@ const source = ts.transpileModule(fs.readFileSync('lib/api.ts', 'utf8'), {
 }).outputText;
 function setup(body, status = 200) {
   const calls = [];
-  const context = { exports: {}, Headers, URLSearchParams, URL, fetch: async (url, options) => {
+  const context = { require: () => ({ getStoredAdminSession: () => null }), exports: {}, Headers, URLSearchParams, URL, fetch: async (url, options) => {
     calls.push({ url, options });
     return new Response(status === 204 ? null : JSON.stringify(body), { status });
   }};

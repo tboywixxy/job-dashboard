@@ -1,4 +1,5 @@
 ﻿"use client";
+import { BrandLogo } from "@/components/BrandLogo";
 
 import { useRef } from "react";
 import Link from "next/link";
@@ -12,7 +13,7 @@ export function MobileNavigation({ items, onNavigate, onLogout, themeMode, onTog
 }) {
   const disclosure = useRef<HTMLDetailsElement>(null);
   return <div className="mobile-header lg:hidden">
-    <Link href="/" className="brand-lockup"><span className="brand-mark">M</span><span>Mastaskillz</span></Link>
+    <BrandLogo compact />
     <div className="flex shrink-0 items-center gap-2">
     <button type="button" className="ui-button !px-3" onClick={onToggleTheme} aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={themeMode === "dark" ? "Light mode" : "Dark mode"}>
       {themeMode === "dark" ? <Sun size={20} /> : <Moon size={20} />}

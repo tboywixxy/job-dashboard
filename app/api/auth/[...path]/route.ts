@@ -15,6 +15,7 @@ async function proxyRequest(request: NextRequest, context: RouteContext) {
 
   const headers = new Headers();
   for (const name of ["authorization", "content-type", "cookie"]) {
+    if (name === "cookie" && request.headers.has("authorization")) continue;
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }

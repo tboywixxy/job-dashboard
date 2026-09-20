@@ -1,5 +1,5 @@
 // lib/api.ts
-import type { AdminSession } from "@/lib/adminSession";
+import { getStoredAdminSession, storeAdminSession, clearAdminSession, type AdminSession } from "@/lib/adminSession";
 const API_BASE_URL = "https://jobs.api.mastaskillz.com";
 const AUTH_BASE_URL = "/api/auth";
 
@@ -256,14 +256,17 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 async function fetchAuthJson<T>(
   path: string,
-  opts?: RequestInit & { token?: string }
+  opts?: RequestInit & { token?: string },
+  retried = false
 ): Promise<T> {
   const headers = new Headers(opts?.headers);
   if (!headers.has("Content-Type") && opts?.body) {
     headers.set("Content-Type", "application/json");
   }
-  if (opts?.token) {
-    headers.set("Authorization", `Bearer ${opts.token}`);
+  const session = getStoredAdminSession();
+  const requestToken = opts?.token && !retiredAccessTokens.has(opts.token) ? opts.token : session?.token || opts?.token;
+  if (requestToken) {
+    headers.set("Authorization", `Bearer ${requestToken}`);
   }
 
   let res: Response;
@@ -281,6 +284,18 @@ async function fetchAuthJson<T>(
     message?: string;
     code?: number;
   };
+
+  const authExpired = res.status === 401 || body.code === 401 ||
+    ((res.status === 403 || body.code === 403) && /invalid or expired token|token expired|jwt expired/i.test(body.message || ""));
+  if (authExpired && session && (requestToken === session.token || retiredAccessTokens.has(requestToken || ""))) {
+    if (retried) {
+      if (getStoredAdminSession()?.token === requestToken) clearAdminSession();
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+    // Parallel requests share one refresh; late failures reuse the rotated token.
+    if (getStoredAdminSession()?.token === requestToken) await refreshAdminSession();
+    return fetchAuthJson<T>(path, opts, true);
+  }
 
   if (!res.ok || (body.code && body.code >= 400) || (body as { success?: boolean }).success === false || (body as { status?: string }).status === "Error") {
     const message =
@@ -318,6 +333,36 @@ function pickToken(body: LoginResponse) {
 
 function pickString(...values: unknown[]) {
   return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() || "";
+}
+
+let refreshPromise: Promise<void> | null = null;
+const retiredAccessTokens = new Set<string>();
+function refreshAdminSession(): Promise<void> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const session = getStoredAdminSession();
+    if (!session) throw new Error("Please sign in again.");
+    const res = await fetch("/api/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+    });
+    const body = await res.json().catch(() => ({})) as LoginResponse;
+    const token = pickToken(body);
+    if (!res.ok || Number(body.code) >= 400 || !token) {
+      if ([400, 401, 403].includes(res.status) || [400, 401, 403].includes(Number(body.code)) || (res.ok && !token)) {
+        if (getStoredAdminSession()?.token === session.token) clearAdminSession();
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+      throw new Error("Could not refresh your session. Please try again.");
+    }
+    // Never restore a session after logout or overwrite a newer login.
+    if (getStoredAdminSession()?.token !== session.token) throw new Error("Your session changed. Please try again.");
+    retiredAccessTokens.add(session.token);
+    storeAdminSession({ ...session, token, refreshToken: pickString(body.refreshToken, body.refresh_token, body.refresh, body.data?.refreshToken, body.data?.refresh_token, body.data?.refresh) || session.refreshToken });
+  })().finally(() => { refreshPromise = null; });
+  return refreshPromise;
 }
 
 export async function loginAdmin(
@@ -361,6 +406,7 @@ export async function loginAdmin(
 
   return {
     token,
+    refreshToken: pickString(response.refreshToken, response.refresh_token, response.refresh, data?.refreshToken, data?.refresh_token, data?.refresh) || undefined,
     email,
     displayName: fullName || email,
     role,

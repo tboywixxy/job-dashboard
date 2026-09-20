@@ -1,8 +1,8 @@
 "use client";
+import { BrandLogo } from "@/components/BrandLogo";
 import { Skeleton, WorkspaceSkeleton } from "@/components/Skeleton";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { MobileNavigation } from "@/components/MobileNavigation";
 import { FilterBar } from "@/components/FilterBar";
 import { ToastNotice } from "@/components/ToastNotice";
@@ -40,6 +40,7 @@ import {
   type WeeklyData,
 } from "@/lib/api";
 import {
+  ADMIN_SESSION_EVENT,
   clearAdminSession,
   getStoredAdminSession,
   storeAdminSession,
@@ -121,6 +122,13 @@ export default function Page() {
     const savedSession = getStoredAdminSession();
     if (savedSession) setAdminSession(savedSession);
     setAuthReady(true);
+    const syncSession = () => setAdminSession(getStoredAdminSession());
+    window.addEventListener(ADMIN_SESSION_EVENT, syncSession);
+    window.addEventListener("storage", syncSession);
+    return () => {
+      window.removeEventListener(ADMIN_SESSION_EVENT, syncSession);
+      window.removeEventListener("storage", syncSession);
+    };
   }, []);
 
   useEffect(() => {
@@ -299,9 +307,9 @@ export default function Page() {
     <main className="admin-workspace min-h-screen bg-[#f5f7fb] text-slate-950">
       <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-64"}`}>
         <div className={`border-b border-white/15 py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
-          <div className={`flex items-center gap-2 ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
-            {!sidebarCollapsed && <Link href="/" className="brand-lockup"><span className="brand-mark">M</span><span>Mastaskillz<small>ADMIN WORKSPACE</small></span></Link>}
-            <button type="button" onClick={() => setSidebarCollapsed((value) => !value)} className="grid h-8 w-8 place-items-center rounded-lg border border-white/20 text-white/85 transition hover:bg-white/15" title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+          <div className={`flex items-center gap-2 ${sidebarCollapsed ? "flex-col justify-center" : "justify-between"}`}>
+            <BrandLogo compact={sidebarCollapsed} />
+            <button type="button" onClick={() => setSidebarCollapsed((value) => !value)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/20 text-white/85 transition hover:bg-white/15" title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>

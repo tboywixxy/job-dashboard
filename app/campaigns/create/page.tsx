@@ -1,7 +1,8 @@
 "use client";
+import { BrandLogo } from "@/components/BrandLogo";
 import { Skeleton, WorkspaceSkeleton } from "@/components/Skeleton";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { MobileNavigation } from "@/components/MobileNavigation";
 import { useRouter } from "next/navigation";
@@ -22,8 +23,11 @@ import {
 } from "lucide-react";
 import { ToastNotice } from "@/components/ToastNotice";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
-import { createCampaign, listCampaignServices, type CampaignService } from "@/lib/api";
+import { CampaignMemberFields } from "@/components/CampaignMemberFields";
+import { emptyMemberDraft, prepareCampaignMembers, fundingResultText, fundingFailure } from "@/lib/campaignMembers";
+import { updateCampaign, bulkFundCampaignMembers, createCampaign, listCampaignServices, type CampaignService } from "@/lib/api";
 import {
+  ADMIN_SESSION_EVENT,
   clearAdminSession,
   getStoredAdminSession,
   storeAdminSession,
@@ -51,18 +55,29 @@ export default function CreateCampaignPage() {
   const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [memberDraft, setMemberDraft] = useState(emptyMemberDraft);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+  const [memberResult, setMemberResult] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [budgetCap, setBudgetCap] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [services, setServices] = useState<CampaignService[]>([]);
   const [allowedTools, setAllowedTools] = useState<string[]>([]);
+  const servicesInitialized = useRef(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
 
   useEffect(() => {
     const savedSession = getStoredAdminSession();
     if (savedSession) setAdminSession(savedSession);
     setAuthReady(true);
+    const syncSession = () => setAdminSession(getStoredAdminSession());
+    window.addEventListener(ADMIN_SESSION_EVENT, syncSession);
+    window.addEventListener("storage", syncSession);
+    return () => {
+      window.removeEventListener(ADMIN_SESSION_EVENT, syncSession);
+      window.removeEventListener("storage", syncSession);
+    };
   }, []);
 
   useEffect(() => {
@@ -75,7 +90,10 @@ export default function CreateCampaignPage() {
       .then((res) => {
         const liveServices = res.data.services || [];
         setServices(liveServices);
-        setAllowedTools(liveServices.filter((service) => service.live).map((service) => service.id));
+        if (!servicesInitialized.current) {
+          setAllowedTools(liveServices.filter((service) => service.live).map((service) => service.id));
+          servicesInitialized.current = true;
+        }
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : "Could not load campaign services.";
@@ -112,16 +130,30 @@ export default function CreateCampaignPage() {
     setNotice(null);
 
     try {
-      await createCampaign(
-        {
-          name: name.trim(),
-          description: description.trim(),
-          allowedTools,
-          budgetCap: budgetCap ? Number(budgetCap) : null,
-          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-        },
-        adminSession?.token
-      );
+      const expiry = expiresAt ? new Date(`${expiresAt}T23:59:59.999`).toISOString() : null;
+      const pendingMembers = prepareCampaignMembers(memberDraft, "active", expiry);
+      const input = { name: name.trim(), description: description.trim(), allowedTools,
+        budgetCap: budgetCap ? Number(budgetCap) : null, expiresAt: expiry };
+      if (input.budgetCap !== null && (!Number.isFinite(input.budgetCap) || input.budgetCap < 0)) throw new Error("Enter a valid budget cap.");
+      if (input.budgetCap !== null && pendingMembers.reduce((sum, row) => sum + (row.amount || 0), 0) > input.budgetCap) throw new Error("Member bonuses exceed the campaign budget cap.");
+      const result = createdCampaignId
+        ? await updateCampaign(createdCampaignId, input, adminSession?.token)
+        : await createCampaign(input, adminSession?.token);
+      const campaignId = result.data.campaign.id;
+      setCreatedCampaignId(campaignId);
+      if (pendingMembers.length) {
+        try {
+          const funded = await bulkFundCampaignMembers(campaignId, { members: pendingMembers, notify: memberDraft.notify }, adminSession?.token);
+          setMemberDraft(emptyMemberDraft);
+          setMemberResult(`Campaign saved. ${fundingResultText(funded.data)}`);
+          return;
+        } catch (error) {
+          const failure = fundingFailure(error);
+          if (!failure.rejected) setMemberDraft(emptyMemberDraft);
+          setMemberResult(`Campaign saved. ${failure.text}`);
+          return;
+        }
+      }
       router.push("/?view=campaigns");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not create campaign.";
@@ -162,6 +194,7 @@ export default function CreateCampaignPage() {
         <form onSubmit={handleCreate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
 
+          {memberResult && <p role="status" className="mb-4 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{memberResult} <Link href="/?view=campaigns" className="font-medium underline">View campaigns</Link></p>}
           <div className="grid gap-4">
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               Campaign name
@@ -239,13 +272,15 @@ export default function CreateCampaignPage() {
               )}
             </div>
 
+            <CampaignMemberFields value={memberDraft} onChange={setMemberDraft} disabled={loading} />
+
             <button
               type="submit"
               disabled={loading}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-60"
             >
               {!loading && <Plus className="h-4 w-4" />}
-              {loading ? <Skeleton label="Creating campaign" className="h-4 w-28" /> : "Create campaign"}
+              {loading ? <Skeleton label="Creating campaign" className="h-4 w-28" /> : memberDraft.enabled ? "Save campaign and add members" : createdCampaignId ? "Save campaign" : "Create campaign"}
             </button>
           </div>
         </form>
@@ -275,12 +310,12 @@ function DashboardChrome({
     <main className="admin-workspace min-h-screen bg-[#f5f7fb] text-slate-950">
       <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-64"}`}>
         <div className={`border-b border-white/15 py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
-          <div className={`flex items-center gap-2 ${sidebarCollapsed ? "justify-center" : "justify-between"}`}>
-            {!sidebarCollapsed && <Link href="/" className="brand-lockup"><span className="brand-mark">M</span><span>Mastaskillz<small>ADMIN WORKSPACE</small></span></Link>}
+          <div className={`flex items-center gap-2 ${sidebarCollapsed ? "flex-col justify-center" : "justify-between"}`}>
+            <BrandLogo compact={sidebarCollapsed} />
             <button
               type="button"
               onClick={onToggleSidebar}
-              className="grid h-8 w-8 place-items-center rounded-lg border border-white/20 text-white/85 transition hover:bg-white/15"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/20 text-white/85 transition hover:bg-white/15"
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}

@@ -21,7 +21,7 @@ export function FeedbackDetails({ feedback, sources }: { feedback: Feedback; sou
     <dl className="feedback-detail-grid">
       <div><dt>Rating</dt><dd>{feedback.rating == null ? "Not rated" : <span className="inline-flex items-center gap-2"><Star size={17} className="fill-amber-400 text-amber-400" />{feedback.rating} / 5</span>}</dd></div>
       <div><dt>Source</dt><dd>{sources.find((source) => source.id === feedback.source)?.label || feedback.source || "Not specified"}</dd></div>
-      <div><dt>Job kind</dt><dd>{feedbackJobKinds(feedback)}</dd></div>
+      <div><dt>Job Type</dt><dd>{feedbackJobKinds(feedback)}</dd></div>
       <div><dt>Status</dt><dd>{feedback.deletedAt || feedback.isDeleted ? "Deleted" : "Active"}</dd></div>
       <div><dt>Created</dt><dd>{date(feedback.createdAt)}</dd></div>
       {feedback.updatedAt && <div><dt>Last updated</dt><dd>{date(feedback.updatedAt)}</dd></div>}

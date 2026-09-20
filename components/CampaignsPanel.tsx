@@ -1,4 +1,6 @@
 "use client";
+import { CampaignMemberFields } from "@/components/CampaignMemberFields";
+import { emptyMemberDraft, prepareCampaignMembers, fundingResultText, fundingFailure } from "@/lib/campaignMembers";
 import { Skeleton } from "@/components/Skeleton";
 
 import { SidePanel } from "@/components/SidePanel";
@@ -326,6 +328,8 @@ export function CampaignsPanel({ token }: { token: string }) {
   const [editExpiresAt, setEditExpiresAt] = useState("");
   const [editAllowedTools, setEditAllowedTools] = useState<string[]>([]);
   const [editNotify, setEditNotify] = useState(true);
+  const [editMemberDraft, setEditMemberDraft] = useState(emptyMemberDraft);
+  const [editMemberResult, setEditMemberResult] = useState("");
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
 
   const selectedCampaign = useMemo(
@@ -375,6 +379,8 @@ export function CampaignsPanel({ token }: { token: string }) {
   };
 
   const openEditCampaign = (campaign: Campaign) => {
+    setEditMemberDraft(emptyMemberDraft);
+    setEditMemberResult("");
     setEditingCampaign(campaign);
     setEditName(campaign.name || "");
     setEditDescription(campaign.description || "");
@@ -615,6 +621,7 @@ export function CampaignsPanel({ token }: { token: string }) {
     setLoading(true);
     setNotice(null);
     try {
+      const pendingMembers = prepareCampaignMembers(editMemberDraft, editStatus, editExpiresAt ? new Date(`${editExpiresAt}T23:59:59.999`).toISOString() : null);
       await updateCampaign(
         editingCampaign.id,
         {
@@ -628,6 +635,23 @@ export function CampaignsPanel({ token }: { token: string }) {
         token,
         { notify: editNotify }
       );
+      if (pendingMembers.length) {
+        try {
+          const result = await bulkFundCampaignMembers(editingCampaign.id, { members: pendingMembers, notify: editMemberDraft.notify }, token);
+          setEditMemberDraft(emptyMemberDraft);
+          setEditMemberResult(`Campaign updated. ${fundingResultText(result.data)}`);
+        } catch (error) {
+          const failure = fundingFailure(error);
+          if (!failure.rejected) setEditMemberDraft(emptyMemberDraft);
+          setEditMemberResult(`Campaign updated. ${failure.text}`);
+        }
+        await loadCampaigns(campaignPage);
+        if (selectedCampaignId === editingCampaign.id) {
+          await loadMembers(editingCampaign.id, memberPage);
+          await loadCampaignDetails(editingCampaign.id);
+        }
+        return;
+      }
       setNotice({ tone: "success", text: "Campaign updated." });
       setEditingCampaign(null);
       await loadCampaigns(campaignPage);
@@ -857,7 +881,7 @@ export function CampaignsPanel({ token }: { token: string }) {
       {editingCampaign && (
         <SidePanel open title="Edit campaign" description={editingCampaign.code} onClose={() => setEditingCampaign(null)} busy={loading} footer={<>
           <button type="button" className="ui-button" disabled={loading} onClick={() => setEditingCampaign(null)}>Cancel</button>
-          <button type="button" className="ui-button ui-primary" disabled={loading} onClick={handleUpdateCampaign}>{loading ? <Skeleton label="Saving changes" className="h-4 w-24" /> : "Save changes"}</button>
+          <button type="button" className="ui-button ui-primary" disabled={loading} onClick={handleUpdateCampaign}>{loading ? <Skeleton label="Saving changes" className="h-4 w-24" /> : editMemberDraft.enabled ? "Save and add members" : "Save changes"}</button>
         </>}>
           {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
             <div className="grid gap-4">
@@ -945,6 +969,9 @@ export function CampaignsPanel({ token }: { token: string }) {
                   <p className="text-sm text-slate-500">No campaign services loaded.</p>
                 )}
               </div>
+
+              <CampaignMemberFields value={editMemberDraft} onChange={setEditMemberDraft} disabled={loading || editStatus === "ended" || Boolean(editingCampaign.deletedAt)} />
+              {editMemberResult && <p role="status" className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{editMemberResult}</p>}
 
               <label className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
                 <input

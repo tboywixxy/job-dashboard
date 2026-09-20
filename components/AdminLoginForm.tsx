@@ -1,4 +1,5 @@
 "use client";
+import { BrandLogo } from "@/components/BrandLogo";
 import { Skeleton } from "@/components/Skeleton";
 
 import { FormEvent, useEffect, useState } from "react";
@@ -50,7 +51,7 @@ export function AdminLoginForm({ onAuthenticated }: Props) {
 
       <div className="flex min-h-dvh items-center justify-center px-6 py-12">
         <div className="w-full max-w-md">
-          <div className="brand-lockup mb-10"><span className="brand-mark">M</span><span>Mastaskillz<small>ADMIN WORKSPACE</small></span></div>
+          <BrandLogo compact className="mb-10" />
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Welcome back</h2>
           <p className="mt-2 text-sm leading-6 text-slate-500">Use the same login details as the main MastaSkillz site.</p>
 

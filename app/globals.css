@@ -277,9 +277,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .admin-workspace { background: var(--background); }
 .admin-sidebar { background: var(--surface); border-color: var(--line); color: var(--foreground); box-shadow: none; }
 .admin-sidebar > div { border-color: var(--line); }
-.brand-lockup { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 750; letter-spacing: -.6px; }
-.brand-lockup small { display: block; margin-top: 3px; font-size: 8px; font-weight: 600; letter-spacing: 1.5px; color: var(--muted); }
-.brand-mark { display: grid; width: 34px; height: 38px; place-items: center; border-radius: 11px; background: var(--brand-soft); color: var(--brand-ink); font-size: 23px; font-weight: 850; }
+:root { --logo-area-bg: #14532d; --logo-tile-bg: #def2e4; }
+.dark { --logo-area-bg: #14532d; }
+.admin-sidebar > div:first-child { background: var(--logo-area-bg); }
+.brand-logo { position: relative; display: flex; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background: transparent; isolation: isolate; }
+.brand-logo-expanded { width: 166px; height: 44px; overflow: hidden; }
+.brand-logo-expanded img { width: 100%; height: auto; object-fit: contain; mix-blend-mode: multiply; }
+.brand-logo-compact { width: 44px; height: 44px; }
+.brand-logo-compact img { width: auto; height: 40px; object-fit: contain; }
 .admin-sidebar button { color: var(--muted); border-color: var(--line); }
 .admin-sidebar button:hover { background: var(--surface-muted); color: var(--foreground); }
 .admin-sidebar nav button { min-height: 46px; border-radius: 10px; margin-bottom: 5px; }
@@ -389,7 +394,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .mobile-navigation a { color: var(--muted); }
 
 /* Small screens: navigation, touch targets, flexible cards and contained tables. */
-.mobile-header { position: sticky; top: 0; z-index: 35; align-items: center; justify-content: space-between; gap: 12px; min-height: 65px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.mobile-header { position: sticky; top: 0; z-index: 35; align-items: center; justify-content: space-between; gap: 12px; min-height: 65px; padding: 10px 16px; background: var(--logo-area-bg); border-bottom: 1px solid var(--line); }
 @media (max-width: 1023px) { .mobile-header { display: flex; } }
 .mobile-menu > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; cursor: pointer; list-style: none; }
 .mobile-menu > summary::-webkit-details-marker { display: none; }
