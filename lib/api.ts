@@ -199,11 +199,40 @@ export type FundJob = {
 };
 
 export type AdminUser = UserSummary & {
-  role?: string;
+  role?: "user" | "employer" | "admin" | string;
   isAdmin?: boolean;
   createdAt?: string;
   bonusBalance?: number;
   bonusCount?: number;
+  activeSessions?: AdminSessionInfo[] | number;
+  [key: string]: unknown;
+};
+
+export type AdminSessionInfo = {
+  id?: string;
+  device?: string;
+  ipAddress?: string;
+  lastActiveAt?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+};
+
+export type AdminStats = Record<string, unknown>;
+
+export type LedgerReconciliationInput = {
+  userId?: string;
+  ownerType: string;
+  kind: string;
+  currency: string;
+};
+
+export type LedgerReconciliationResult = {
+  ledgerBalance: number;
+  cachedBalance: number;
+  drift: number;
+  repaired: boolean;
+  chainIntact: boolean;
+  chainBrokenAtEntry: string | null;
 };
 
 export type UserBalance = {
@@ -632,8 +661,48 @@ export async function selectAllAdminUsers(opts?: {
   );
 }
 
+export async function getAdminUser(userId: string, token?: string) {
+  const response = await fetchAuthJson<CampaignEnvelope<{ user: AdminUser } | AdminUser> | AdminUser>(
+    `/admin/users/${encodeURIComponent(userId)}`,
+    { token }
+  );
+  if ("data" in response && response.data) return response as CampaignEnvelope<{ user: AdminUser } | AdminUser>;
+  return { code: 200, status: "Success" as const, data: response as AdminUser };
+}
+
+export async function updateAdminUserRole(
+  userId: string,
+  role: "user" | "employer" | "admin",
+  token?: string
+) {
+  return fetchAuthJson<CampaignEnvelope<{ userId: string; role: string }>>(
+    `/admin/users/${encodeURIComponent(userId)}/roles`,
+    { method: "PUT", token, body: JSON.stringify({ role }) }
+  );
+}
+
+export async function deleteAdminUser(userId: string, token?: string) {
+  return fetchAuthJson<CampaignEnvelope<Record<string, unknown>>>(
+    `/admin/users/${encodeURIComponent(userId)}`,
+    { method: "DELETE", token }
+  );
+}
+
+export async function getAdminStats(token?: string) {
+  return fetchAuthJson<CampaignEnvelope<AdminStats> | AdminStats>("/admin/stats", { token });
+}
+
+export async function reconcileLedger(input: LedgerReconciliationInput, token?: string) {
+  const response = await fetchAuthJson<CampaignEnvelope<LedgerReconciliationResult> | LedgerReconciliationResult>(
+    "/admin/ledger/reconcile",
+    { method: "POST", token, body: JSON.stringify(input) }
+  );
+  if ("data" in response && response.data) return response as CampaignEnvelope<LedgerReconciliationResult>;
+  return { code: 200, status: "Success" as const, data: response as LedgerReconciliationResult };
+}
+
 export async function deleteCampaign(id: string, opts?: { token?: string }) {
-  return fetchAuthJson<CampaignEnvelope<{ campaign?: Campaign; forfeited?: { userId: string; amount?: number }[]; summary?: RevokeSummary }>>(
+  return fetchAuthJson<CampaignEnvelope<{ id?: string; deletedAt?: string; campaign?: Campaign; forfeited?: { userId: string; reclaimed: number }[]; summary?: RevokeSummary }>>(
     `/admin/campaigns/${id}`,
     {
       method: "DELETE",
@@ -660,6 +729,18 @@ export async function bulkFundCampaignMembers(
   });
 }
 
+export async function fundCampaignMember(
+  id: string,
+  userId: string,
+  input: { amount: number; notify?: boolean },
+  token?: string
+) {
+  return fetchAuthJson<CampaignEnvelope<{ funded: { userId: string; amount: number } }>>(
+    `/admin/campaigns/${id}/members/${encodeURIComponent(userId)}`,
+    { method: "POST", token, body: JSON.stringify(input) }
+  );
+}
+
 export async function createCampaignFundJob(
   id: string,
   input: { amount: number; allUsers?: boolean; members?: FundMemberInput[]; role?: string; notify?: boolean },
@@ -679,9 +760,18 @@ export async function getCampaignFundJob(id: string, jobId: string, token?: stri
   );
 }
 
-export async function listCampaignFundJobs(id: string, token?: string) {
-  return fetchAuthJson<CampaignEnvelope<{ jobs: FundJob[] }>>(
-    `/admin/campaigns/${id}/fund-jobs`,
+export async function listCampaignFundJobs(id: string, token?: string, opts?: {
+  status?: "queued" | "processing" | "completed" | "failed" | "all";
+  page?: number;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (opts?.status && opts.status !== "all") params.set("status", opts.status);
+  if (opts?.page) params.set("page", String(opts.page));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetchAuthJson<CampaignEnvelope<{ jobs: FundJob[]; pagination?: Pagination }>>(
+    `/admin/campaigns/${id}/fund-jobs${query}`,
     { token }
   );
 }

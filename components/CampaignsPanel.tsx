@@ -1,6 +1,4 @@
 "use client";
-import { CampaignMemberFields } from "@/components/CampaignMemberFields";
-import { emptyMemberDraft, prepareCampaignMembers, fundingResultText, fundingFailure } from "@/lib/campaignMembers";
 import { Skeleton } from "@/components/Skeleton";
 
 import { SidePanel } from "@/components/SidePanel";
@@ -14,11 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
-  LogOut,
   Pencil,
   Plus,
-  RefreshCw,
-  ShieldCheck,
   Trash2,
   Users,
   UserMinus,
@@ -26,16 +21,20 @@ import {
 } from "lucide-react";
 import { CustomSelect } from "@/components/CustomSelect";
 import { ToastNotice } from "@/components/ToastNotice";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   bulkFundCampaignMembers,
   createCampaignFundJob,
   deleteCampaign,
   getCampaign,
   getCampaignFundJob,
+  getCampaignReport,
+  fundCampaignMember,
   getUserBalance,
   listAdminUsers,
   listAdminTransactions,
   listCampaignMembers,
+  listCampaignFundJobs,
   listCampaigns,
   listCampaignServices,
   revokeCampaignMembers,
@@ -46,6 +45,7 @@ import {
   type Campaign,
   type CampaignEffectiveStatus,
   type CampaignMember,
+  type CampaignReport,
   type CampaignService,
   type CampaignStatus,
   type FundJob,
@@ -59,10 +59,10 @@ type Notice = {
   text: string;
 };
 
-type CampaignTab = "campaigns" | "members" | "funding" | "users" | "transactions" | "wallet";
+type CampaignTab = "campaigns" | "overview" | "members" | "funding" | "report" | "settings" | "users" | "transactions" | "wallet";
 
 const statusOptions: (CampaignEffectiveStatus | "all")[] = ["all", "active", "paused", "expired", "ended"];
-const memberStatusOptions: (CampaignMember["status"] | "all")[] = ["all", "active", "exhausted", "expired", "revoked"];
+const memberStatusOptions: (CampaignMember["status"] | "all")[] = ["all", "active", "exhausted", "revoked", "expired"];
 const emptyPagination: Pagination = { total: 0, page: 1, limit: 20, totalPages: 1 };
 
 const campaignStatusSelectOptions = statusOptions.map((status) => ({
@@ -100,12 +100,19 @@ const transactionStatusSelectOptions: { value: "all" | "completed" | "failed"; l
 ];
 
 function currency(value: number | null | undefined) {
-  if (value == null) return "Uncapped";
+  if (value === undefined) return "—";
+  if (value === null) return "Uncapped";
   return new Intl.NumberFormat("en-NG", {
     style: "currency",
     currency: "NGN",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function reportMetric(key: string, value: number) {
+  return /count|members|users|requested|funded|skipped|revoked|notFound/i.test(key)
+    ? value.toLocaleString()
+    : currency(value);
 }
 
 function dateText(value: string | null | undefined) {
@@ -151,21 +158,6 @@ function isRouteNotFound(err: unknown) {
       ? (err as { body?: { message?: string } }).body
       : undefined;
   return /route not found/i.test(message) || /route not found/i.test(body?.message || "");
-}
-
-function parseMembers(input: string, amount?: number) {
-  return input
-    .split(/\r?\n|,/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const parts = entry.split(":").map((part) => part.trim());
-      const identifier = parts[0];
-      const rowAmount = parts[1] ? Number(parts[1]) : amount;
-      return identifier.includes("@")
-        ? { email: identifier, amount: rowAmount }
-        : { userId: identifier, amount: rowAmount };
-    });
 }
 
 function summaryText(prefix: string, summary?: { requested?: number; funded?: number; skipped?: number; totalCredited?: number; revoked?: number; notFound?: number; totalReclaimed?: number }) {
@@ -271,6 +263,7 @@ function PageControls({
 }
 
 export function CampaignsPanel({ token }: { token: string }) {
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
   const [activeTab, setActiveTab] = useState<CampaignTab>("campaigns");
   const [statusFilter, setStatusFilter] = useState<CampaignEffectiveStatus | "all">("all");
   const [nameFilter, setNameFilter] = useState("");
@@ -309,18 +302,23 @@ export function CampaignsPanel({ token }: { token: string }) {
   const [userRole, setUserRole] = useState("");
   const [userHasBonus, setUserHasBonus] = useState<"all" | "true" | "false">("all");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedUserAmounts, setSelectedUserAmounts] = useState<Record<string, string>>({});
   const [selectAllTotal, setSelectAllTotal] = useState<number | null>(null);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [memberToFund, setMemberToFund] = useState<CampaignMember | null>(null);
+  const [singleFundAmount, setSingleFundAmount] = useState("500");
 
   const [balance, setBalance] = useState<UserBalance | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [confirmation, setConfirmation] = useState<{ title: string; description: string; confirmLabel: string; tone?: "default" | "danger"; onConfirm: () => void } | null>(null);
 
   const [fundAmount, setFundAmount] = useState("500");
-  const [fundMembers, setFundMembers] = useState("");
-  const [fundRole, setFundRole] = useState("");
   const [notifyMembers, setNotifyMembers] = useState(true);
-  const [revokeUsers, setRevokeUsers] = useState("");
   const [fundJob, setFundJob] = useState<FundJob | null>(null);
+  const [fundJobs, setFundJobs] = useState<FundJob[]>([]);
+  const [jobStatus, setJobStatus] = useState<"all" | "queued" | "processing" | "completed" | "failed">("all");
+  const [report, setReport] = useState<CampaignReport | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editStatus, setEditStatus] = useState<CampaignStatus>("active");
@@ -328,8 +326,6 @@ export function CampaignsPanel({ token }: { token: string }) {
   const [editExpiresAt, setEditExpiresAt] = useState("");
   const [editAllowedTools, setEditAllowedTools] = useState<string[]>([]);
   const [editNotify, setEditNotify] = useState(true);
-  const [editMemberDraft, setEditMemberDraft] = useState(emptyMemberDraft);
-  const [editMemberResult, setEditMemberResult] = useState("");
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
 
   const selectedCampaign = useMemo(
@@ -341,46 +337,34 @@ export function CampaignsPanel({ token }: { token: string }) {
   const selectedIsEnded = selectedCampaign?.status === "ended" || selectedCampaign?.effectiveStatus === "ended";
   const selectedEffectiveStatus = selectedCampaign ? effectiveStatus(selectedCampaign) : "";
   const selectedIsDeleted = selectedEffectiveStatus === "deleted" || Boolean(selectedCampaign?.deletedAt);
-  const canFundSelected = Boolean(selectedCampaignId) && !loading && !selectedIsEnded && !selectedIsDeleted;
-  const tabs: { id: CampaignTab; label: string; count?: number }[] = [
-    { id: "campaigns", label: "Campaigns", count: campaignPagination.total },
+  const canFundSelected = Boolean(selectedCampaignId) && !loading && !selectedIsEnded && !selectedIsDeleted && selectedEffectiveStatus !== "expired";
+  const intendedFundingTotal = selectAllTotal !== null
+    ? selectAllTotal * (Number(fundAmount) || 0)
+    : selectedUserIds.reduce((sum, id) => sum + (Number(selectedUserAmounts[id]) > 0 ? Number(selectedUserAmounts[id]) : Number(fundAmount) || 0), 0);
+  const detailTabs: { id: CampaignTab; label: string; count?: number }[] = [
+    { id: "overview", label: "Overview" },
     { id: "members", label: "Members", count: memberPagination.total },
     { id: "funding", label: "Funding", count: fundJob ? 1 : undefined },
-    { id: "users", label: "Users", count: userPagination.total },
-    { id: "transactions", label: "Transactions", count: transactionPagination.total },
-    { id: "wallet", label: "Wallet" },
+    { id: "report", label: "Report" },
+    { id: "settings", label: "Settings" },
   ];
-
-  const totalStats = useMemo(() => {
-    return campaigns.reduce(
-      (acc, campaign) => {
-        acc.memberCount += campaign.stats?.memberCount || 0;
-        acc.totalGranted += campaign.stats?.totalGranted || 0;
-        acc.totalRemaining += campaign.stats?.totalRemaining || 0;
-        acc.totalSpent += campaign.stats?.totalSpent || 0;
-        acc.spendableRemaining += campaign.stats?.spendableRemaining || 0;
-        acc.budgetRemaining += campaign.stats?.budgetRemaining || 0;
-        return acc;
-      },
-      { memberCount: 0, totalGranted: 0, totalRemaining: 0, totalSpent: 0, spendableRemaining: 0, budgetRemaining: 0 }
-    );
-  }, [campaigns]);
 
   const showError = useCallback((err: unknown) => {
     setNotice({ tone: "error", text: userFacingError(err) });
   }, []);
 
-  const selectCampaign = (campaign: Campaign) => {
+  const selectCampaign = (campaign: Campaign, tab: CampaignTab = "overview") => {
     setSelectedCampaignId(campaign.id);
     setCampaignDetails(campaign);
     setMembers([]);
     setMemberPagination(emptyPagination);
     setMemberPage(1);
+    setActiveTab(tab);
   };
 
+  const returnToCampaigns = () => setActiveTab("campaigns");
+
   const openEditCampaign = (campaign: Campaign) => {
-    setEditMemberDraft(emptyMemberDraft);
-    setEditMemberResult("");
     setEditingCampaign(campaign);
     setEditName(campaign.name || "");
     setEditDescription(campaign.description || "");
@@ -459,11 +443,8 @@ export function CampaignsPanel({ token }: { token: string }) {
       setCampaigns(items);
       setCampaignPagination(res.data.pagination || emptyPagination);
       setCampaignPage(res.data.pagination?.page || page);
-      setSelectedCampaignId((currentId) => {
-        if (currentId && items.some((campaign) => campaign.id === currentId)) return currentId;
-        setCampaignDetails(items[0] || null);
-        return items[0]?.id || "";
-      });
+      setSelectedCampaignId((currentId) => currentId && items.some((campaign) => campaign.id === currentId) ? currentId : "");
+      setCampaignDetails((current) => current && items.some((campaign) => campaign.id === current.id) ? current : null);
       setNotice({ tone: "success", text: "Campaigns refreshed." });
     } catch (err) {
       showError(err);
@@ -487,7 +468,7 @@ export function CampaignsPanel({ token }: { token: string }) {
     try {
       const res = await listAdminUsers({
         token,
-        search: userSearch.trim(),
+        name: userSearch.trim(),
         role: userRole.trim(),
         hasBonus: userHasBonus === "all" ? "all" : userHasBonus === "true",
         page,
@@ -530,9 +511,50 @@ export function CampaignsPanel({ token }: { token: string }) {
     }
   }, [showError, token, transactionFrom, transactionPage, transactionReference, transactionStatus, transactionTo, transactionType, transactionUserId]);
 
+  const loadReport = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    setLoading(true);
+    try { const response = await getCampaignReport(selectedCampaignId, token); setReport(response.data); }
+    catch (err) { showError(err); }
+    finally { setLoading(false); }
+  }, [selectedCampaignId, showError, token]);
+
+  const loadFundJobs = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    setLoading(true);
+    try { const response = await listCampaignFundJobs(selectedCampaignId, token, { status: jobStatus, page: 1, limit: 20 }); setFundJobs(response.data.jobs || []); }
+    catch (err) { showError(err); }
+    finally { setLoading(false); }
+  }, [jobStatus, selectedCampaignId, showError, token]);
+
   useEffect(() => {
-    if (token) void loadCampaigns(1);
-  }, [loadCampaigns, token]);
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    if (status && ["active", "paused", "expired", "ended"].includes(status)) setStatusFilter(status as CampaignEffectiveStatus);
+    setNameFilter(params.get("name") || "");
+    setCreatedFrom(params.get("createdFrom") || "");
+    setCreatedTo(params.get("createdTo") || "");
+    setBudgetMin(params.get("budgetMin") || "");
+    setBudgetMax(params.get("budgetMax") || "");
+    setIncludeDeleted(params.get("includeDeleted") === "true");
+    setCampaignPage(Math.max(1, Number(params.get("page")) || 1));
+    setFiltersHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (token && filtersHydrated) void loadCampaigns(campaignPage);
+  }, [campaignPage, filtersHydrated, loadCampaigns, token]);
+
+  useEffect(() => {
+    if (!filtersHydrated) return;
+    const params = new URLSearchParams(); params.set("view", "campaigns");
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (nameFilter.trim()) params.set("name", nameFilter.trim());
+    if (createdFrom) params.set("createdFrom", createdFrom); if (createdTo) params.set("createdTo", createdTo);
+    if (budgetMin) params.set("budgetMin", budgetMin); if (budgetMax) params.set("budgetMax", budgetMax);
+    if (includeDeleted) params.set("includeDeleted", "true"); if (campaignPage > 1) params.set("page", String(campaignPage));
+    window.history.replaceState(null, "", `/?${params.toString()}`);
+  }, [budgetMax, budgetMin, campaignPage, createdFrom, createdTo, filtersHydrated, includeDeleted, nameFilter, statusFilter]);
 
   useEffect(() => {
     if (token) void loadServices();
@@ -546,15 +568,28 @@ export function CampaignsPanel({ token }: { token: string }) {
   }, [loadCampaignDetails, loadMembers, selectedCampaignId]);
 
   useEffect(() => {
+    if (activeTab === "users" && users.length === 0) void loadUsers(1);
+  }, [activeTab, loadUsers, users.length]);
+
+  useEffect(() => {
+    if (activeTab === "report") void loadReport();
+    if (activeTab === "funding") void loadFundJobs();
+  }, [activeTab, loadFundJobs, loadReport]);
+
+  useEffect(() => {
     if (!notice) return;
     const timeout = window.setTimeout(() => setNotice(null), notice.tone === "error" ? 7000 : 4000);
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  const handleStatusChange = async (status: CampaignStatus) => {
+  const handleStatusChange = async (status: CampaignStatus, confirmed = false) => {
     if (!selectedCampaignId) return;
     if (selectedIsEnded && status === "active") {
       setNotice({ tone: "info", text: "Ended campaigns are terminal and cannot be reactivated." });
+      return;
+    }
+    if (status === "ended" && !confirmed) {
+      setConfirmation({ title: "End this campaign?", description: "Ending is terminal. This campaign will not be eligible for reactivation or future funding.", confirmLabel: "End campaign", tone: "danger", onConfirm: () => { void handleStatusChange(status, true); } });
       return;
     }
     setLoading(true);
@@ -571,13 +606,16 @@ export function CampaignsPanel({ token }: { token: string }) {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (confirmed = false) => {
     if (!selectedCampaignId || loading) return;
     if (selectedIsDeleted) {
       setNotice({ tone: "info", text: "Deleted campaigns do not offer delete or funding actions." });
       return;
     }
-    if (!window.confirm("Are you sure you want to delete this campaign? Unused member bonuses will be forfeited.")) return;
+    if (!confirmed) {
+      setConfirmation({ title: "Delete this campaign?", description: "This is a soft delete. Unspent member campaign credit may be forfeited or reclaimed according to the backend response.", confirmLabel: "Delete campaign", tone: "danger", onConfirm: () => { void handleDelete(true); } });
+      return;
+    }
     setLoading(true);
     setNotice(null);
     try {
@@ -585,11 +623,12 @@ export function CampaignsPanel({ token }: { token: string }) {
       setSelectedCampaignId("");
       setCampaignDetails(null);
       setMembers([]);
+      setActiveTab("campaigns");
       setNotice({
         tone: "success",
         text: res.data.summary
           ? summaryText("Campaign deleted and unused member bonuses forfeited", res.data.summary)
-          : `Campaign deleted. ${res.data.forfeited?.length || 0} member bonus item(s) forfeited.`,
+          : `Campaign deleted. ${res.data.forfeited?.length || 0} member bonus item(s) forfeited; ${currency((res.data.forfeited || []).reduce((sum, item) => sum + (item.reclaimed || 0), 0))} reclaimed.`,
       });
       await loadCampaigns(1);
     } catch (err) {
@@ -606,7 +645,7 @@ export function CampaignsPanel({ token }: { token: string }) {
     }
   };
 
-  const handleUpdateCampaign = async () => {
+  const handleUpdateCampaign = async (confirmed = false) => {
     if (!editingCampaign) return;
     if (!editName.trim()) {
       setNotice({ tone: "error", text: "Campaign name is required." });
@@ -617,41 +656,37 @@ export function CampaignsPanel({ token }: { token: string }) {
       setNotice({ tone: "info", text: "Ended campaigns are terminal and cannot be reactivated." });
       return;
     }
+    const nextBudget = editBudgetCap ? Number(editBudgetCap) : null;
+    if (nextBudget !== null && (!Number.isFinite(nextBudget) || nextBudget < 0)) {
+      setNotice({ tone: "error", text: "Enter a valid non-negative budget cap." });
+      return;
+    }
+    const nextExpiry = editExpiresAt ? new Date(`${editExpiresAt}T23:59:59.999`).toISOString() : null;
+    if (nextExpiry && new Date(nextExpiry).getTime() <= Date.now()) {
+      setNotice({ tone: "error", text: "Expiration must be in the future." });
+      return;
+    }
+    if (editStatus === "ended" && editingCampaign.status !== "ended" && !confirmed) {
+      setConfirmation({ title: "End this campaign while saving?", description: "Ending is terminal and cannot be undone through the admin workspace.", confirmLabel: "Save and end", tone: "danger", onConfirm: () => { void handleUpdateCampaign(true); } });
+      return;
+    }
 
     setLoading(true);
     setNotice(null);
     try {
-      const pendingMembers = prepareCampaignMembers(editMemberDraft, editStatus, editExpiresAt ? new Date(`${editExpiresAt}T23:59:59.999`).toISOString() : null);
       await updateCampaign(
         editingCampaign.id,
         {
           name: editName.trim(),
           description: editDescription.trim(),
           status: editStatus,
-          budgetCap: editBudgetCap ? Number(editBudgetCap) : null,
+          budgetCap: nextBudget,
           allowedTools: editAllowedTools,
-          expiresAt: editExpiresAt ? new Date(`${editExpiresAt}T23:59:59.999`).toISOString() : null,
+          expiresAt: nextExpiry,
         },
         token,
         { notify: editNotify }
       );
-      if (pendingMembers.length) {
-        try {
-          const result = await bulkFundCampaignMembers(editingCampaign.id, { members: pendingMembers, notify: editMemberDraft.notify }, token);
-          setEditMemberDraft(emptyMemberDraft);
-          setEditMemberResult(`Campaign updated. ${fundingResultText(result.data)}`);
-        } catch (error) {
-          const failure = fundingFailure(error);
-          if (!failure.rejected) setEditMemberDraft(emptyMemberDraft);
-          setEditMemberResult(`Campaign updated. ${failure.text}`);
-        }
-        await loadCampaigns(campaignPage);
-        if (selectedCampaignId === editingCampaign.id) {
-          await loadMembers(editingCampaign.id, memberPage);
-          await loadCampaignDetails(editingCampaign.id);
-        }
-        return;
-      }
       setNotice({ tone: "success", text: "Campaign updated." });
       setEditingCampaign(null);
       await loadCampaigns(campaignPage);
@@ -696,7 +731,7 @@ export function CampaignsPanel({ token }: { token: string }) {
     try {
       const res = await selectAllAdminUsers({
         token,
-        search: userSearch.trim(),
+        name: userSearch.trim(),
         role: userRole.trim(),
         hasBonus: userHasBonus === "all" ? "all" : userHasBonus === "true",
       });
@@ -713,7 +748,7 @@ export function CampaignsPanel({ token }: { token: string }) {
   const handleFundSelectedUsers = async () => {
     if (!selectedCampaignId) return;
     if (!canFundSelected) {
-      setNotice({ tone: "info", text: "Funding is disabled for ended or deleted campaigns." });
+      setNotice({ tone: "info", text: "Funding is disabled for expired, ended, or deleted campaigns. Extend the expiry date to reactivate an expired campaign." });
       return;
     }
     const amount = Number(fundAmount);
@@ -729,51 +764,10 @@ export function CampaignsPanel({ token }: { token: string }) {
     setLoading(true);
     setNotice(null);
     try {
-      const jobRes = await createCampaignFundJob(
-        selectedCampaignId,
-        {
-          amount,
-          allUsers: selectAllTotal !== null,
-          members: selectAllTotal === null ? selectedUserIds.map((userId) => ({ userId, amount })) : undefined,
-          role: fundRole.trim() || undefined,
-          notify: notifyMembers,
-        },
-        token
-      );
-      const job = jobRes.data.job;
-      setFundJob(job);
-      setNotice({ tone: "info", text: `Funding job ${jobId(job) || "started"} is ${job.status}.` });
-      await pollFundJob(job);
-      await loadCampaigns(campaignPage);
-      await loadMembers(selectedCampaignId, 1);
-    } catch (err) {
-      showError(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFund = async () => {
-    if (!selectedCampaignId) return;
-    if (!canFundSelected) {
-      setNotice({ tone: "info", text: "Funding is disabled for ended or deleted campaigns." });
-      return;
-    }
-    const sharedAmount = Number(fundAmount);
-    const parsedMembers = parseMembers(fundMembers, sharedAmount);
-
-    if (parsedMembers.length === 0) {
-      setNotice({ tone: "error", text: "Add at least one email or user ID to fund." });
-      return;
-    }
-
-    setLoading(true);
-    setNotice(null);
-    try {
-      if (parsedMembers.length > 100) {
+      if (selectAllTotal !== null) {
         const jobRes = await createCampaignFundJob(
           selectedCampaignId,
-          { members: parsedMembers, amount: sharedAmount, notify: notifyMembers },
+          { amount, members: selectedUserIds.map((userId) => ({ userId })), notify: notifyMembers },
           token
         );
         const job = jobRes.data.job;
@@ -781,19 +775,17 @@ export function CampaignsPanel({ token }: { token: string }) {
         setNotice({ tone: "info", text: `Funding job ${jobId(job) || "started"} is ${job.status}.` });
         await pollFundJob(job);
       } else {
-        const res = await bulkFundCampaignMembers(
+        const result = await bulkFundCampaignMembers(
           selectedCampaignId,
-          { members: parsedMembers, amount: sharedAmount, notify: notifyMembers },
+          { amount, notify: notifyMembers, members: selectedUserIds.map((userId) => ({ userId, amount: Number(selectedUserAmounts[userId]) > 0 ? Number(selectedUserAmounts[userId]) : undefined })) },
           token
         );
-        const funded = res.data.summary?.funded ?? res.data.funded?.length ?? 0;
-        const unmatched = res.data.unmatched?.length || res.data.summary?.skipped || 0;
-        setNotice({
-          tone: unmatched ? "info" : "success",
-          text: summaryText(`Funded ${funded} member(s); ${unmatched} unmatched`, res.data.summary),
-        });
+        const unmatched = result.data.unmatched?.length || 0;
+        setNotice({ tone: unmatched ? "info" : "success", text: summaryText("Funding complete", result.data.summary) });
       }
-      setFundMembers("");
+      setSelectedUserIds([]);
+      setSelectedUserAmounts({});
+      setSelectAllTotal(null);
       await loadCampaigns(campaignPage);
       await loadMembers(selectedCampaignId, 1);
     } catch (err) {
@@ -803,23 +795,22 @@ export function CampaignsPanel({ token }: { token: string }) {
     }
   };
 
-  const handleRevoke = async () => {
+  const handleRevoke = async (ids = selectedMemberIds, confirmed = false) => {
     if (!selectedCampaignId) return;
-    const userIds = revokeUsers
-      .split(/\r?\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    if (userIds.length === 0) {
-      setNotice({ tone: "error", text: "Add at least one user ID to revoke." });
+    if (ids.length === 0) {
+      setNotice({ tone: "error", text: "Select at least one campaign member to revoke." });
+      return;
+    }
+    if (!confirmed) {
+      setConfirmation({ title: "Revoke unspent campaign credit?", description: `This will revoke unused credit for ${ids.length} selected member(s). Spent credit remains, and only unused funds return to the campaign budget.`, confirmLabel: "Revoke credit", tone: "danger", onConfirm: () => { void handleRevoke(ids, true); } });
       return;
     }
 
     setLoading(true);
     setNotice(null);
     try {
-      const res = await revokeCampaignMembers(selectedCampaignId, userIds, token);
-      setRevokeUsers("");
+      const res = await revokeCampaignMembers(selectedCampaignId, ids, token);
+      setSelectedMemberIds([]);
       setNotice({
         tone: "success",
         text: summaryText(
@@ -834,6 +825,25 @@ export function CampaignsPanel({ token }: { token: string }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFundOne = async () => {
+    if (!selectedCampaignId || !memberToFund) return;
+    const amount = Number(singleFundAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setNotice({ tone: "error", text: "Enter a funding amount above zero." });
+      return;
+    }
+    setLoading(true);
+    try {
+      await fundCampaignMember(selectedCampaignId, memberToFund.userId, { amount, notify: notifyMembers }, token);
+      const memberName = displayUser(memberToFund).primary;
+      setMemberToFund(null);
+      setNotice({ tone: "success", text: `${memberName} received ${currency(amount)}.` });
+      await loadCampaignDetails(selectedCampaignId);
+      await loadMembers(selectedCampaignId, memberPage);
+    } catch (err) { showError(err); }
+    finally { setLoading(false); }
   };
 
   const loadBalance = async () => {
@@ -878,10 +888,11 @@ export function CampaignsPanel({ token }: { token: string }) {
   return (
     <div className="space-y-5 sm:space-y-6 lg:space-y-8">
       {notice && !editingCampaign && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
+      {confirmation && <ConfirmDialog open title={confirmation.title} description={confirmation.description} confirmLabel={confirmation.confirmLabel} tone={confirmation.tone} busy={loading} onClose={() => setConfirmation(null)} onConfirm={() => { const confirm = confirmation.onConfirm; setConfirmation(null); confirm(); }} />}
       {editingCampaign && (
         <SidePanel open title="Edit campaign" description={editingCampaign.code} onClose={() => setEditingCampaign(null)} busy={loading} footer={<>
           <button type="button" className="ui-button" disabled={loading} onClick={() => setEditingCampaign(null)}>Cancel</button>
-          <button type="button" className="ui-button ui-primary" disabled={loading} onClick={handleUpdateCampaign}>{loading ? <Skeleton label="Saving changes" className="h-4 w-24" /> : editMemberDraft.enabled ? "Save and add members" : "Save changes"}</button>
+          <button type="button" className="ui-button ui-primary" disabled={loading} onClick={() => void handleUpdateCampaign()}>{loading ? <Skeleton label="Saving changes" className="h-4 w-24" /> : "Save changes"}</button>
         </>}>
           {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
             <div className="grid gap-4">
@@ -970,9 +981,6 @@ export function CampaignsPanel({ token }: { token: string }) {
                 )}
               </div>
 
-              <CampaignMemberFields value={editMemberDraft} onChange={setEditMemberDraft} disabled={loading || editStatus === "ended" || Boolean(editingCampaign.deletedAt)} />
-              {editMemberResult && <p role="status" className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{editMemberResult}</p>}
-
               <label className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
                 <input
                   type="checkbox"
@@ -988,33 +996,10 @@ export function CampaignsPanel({ token }: { token: string }) {
         </SidePanel>
       )}
 
-      <section className="relative overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 bg-white px-4 py-2.5 sm:px-5">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[#2f8f42]">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Promotional bonus admin
-              </div>
-              <p className="max-w-3xl text-[11px] leading-4 text-slate-500">
-                Filter campaigns, inspect members, fund users, and audit wallet activity from one workspace.
-              </p>
-            </div>
-            <button
-              onClick={() => loadCampaigns(1)}
-              disabled={loading}
-              className="inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
-            >
-              {!loading && <RefreshCw className="h-4 w-4" />}
-              {loading ? <Skeleton label="Refreshing data" className="h-4 w-24" /> : "Refresh data"}
-            </button>
-          </div>
-        </div>
-
-        <div className="px-4 py-2.5 sm:px-5">
-          <div className="flex w-full flex-col gap-3">
-            <FilterBar label="Campaign filters" summary={[nameFilter, statusFilter !== "all" ? statusFilter : "", createdFrom, createdTo, budgetMin && `Min ${budgetMin}`, budgetMax && `Max ${budgetMax}`, includeDeleted ? "Including deleted" : ""].filter(Boolean).join(" / ") || "All campaigns"}>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {activeTab === "campaigns" && <FilterBar label="" summary={[nameFilter, statusFilter !== "all" ? statusFilter : "", createdFrom, createdTo, budgetMin && `Min ${budgetMin}`, budgetMax && `Max ${budgetMax}`, includeDeleted ? "Including deleted" : ""].filter(Boolean).join(" / ")}>
+            <div className="filter-toolbar-layout">
+              <div className="filter-toolbar-scroll">
+                <div className="filter-toolbar-fields grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <input
                 value={nameFilter}
                 onChange={(event) => setNameFilter(event.target.value)}
@@ -1073,81 +1058,35 @@ export function CampaignsPanel({ token }: { token: string }) {
                 placeholder="Budget max"
                 className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10"
               />
-              <div className="grid gap-2 sm:col-span-2 xl:col-span-4 xl:flex xl:justify-end">
+                </div>
+              </div>
+              <div className="filter-actions">
                 <button
                   onClick={() => {
-                    setCampaigns([]);
-                    setMembers([]);
-                    setTransactions([]);
-                    setSelectedCampaignId("");
-                    setEditingCampaign(null);
-                    setBalance(null);
-                    setNotice({ tone: "info", text: "Use the sidebar account control to end this admin session." });
+                    setNameFilter(""); setStatusFilter("all"); setCreatedFrom(""); setCreatedTo("");
+                    setBudgetMin(""); setBudgetMax(""); setIncludeDeleted(false); setCampaignPage(1);
                   }}
                   disabled={loading}
                   className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
                 >
-                  <LogOut className="h-4 w-4" />
-                  Clear workspace
+                  Clear filters
                 </button>
               </div>
             </div>
-            </FilterBar>
+      </FilterBar>}
+
+      {activeTab === "campaigns" ? null : selectedCampaign ? (
+        <div className="campaign-detail-nav sticky top-[65px] z-10 overflow-x-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm backdrop-blur lg:top-0">
+          <div className="flex min-w-max items-center gap-1">
+            <button type="button" onClick={returnToCampaigns} className="mr-2 inline-flex min-h-10 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-950"><ChevronLeft className="h-4 w-4" />Campaigns</button>
+            <span className="mr-2 hidden h-5 w-px bg-slate-200 sm:block" />
+            {detailTabs.map((tab) => {
+              const isActive = activeTab === tab.id || (tab.id === "funding" && ["funding", "users", "transactions", "wallet"].includes(activeTab));
+              return <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={`relative inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition ${isActive ? "bg-[#48C05C]/10 text-[#2f8f42]" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"}`} aria-current={isActive ? "page" : undefined}><span>{tab.label}</span>{tab.count !== undefined && <span className={`rounded-full px-2 py-0.5 text-xs ${isActive ? "bg-white text-[#2f8f42]" : "bg-slate-100 text-slate-500"}`}>{tab.count.toLocaleString()}</span>}</button>;
+            })}
           </div>
         </div>
-
-      </section>
-
-      <div className="sticky top-[65px] z-10 overflow-x-auto rounded-lg bg-slate-100/60 px-2 py-1.5 backdrop-blur lg:top-0 dark:bg-white/5">
-        <div className="flex min-w-max items-center gap-1">
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`relative inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition ${
-                  isActive
-                    ? "bg-[#48C05C]/10 text-[#2f8f42]"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-                }`}
-                aria-current={isActive ? "page" : undefined}
-              >
-                <span>{tab.label}</span>
-                {tab.count !== undefined && (
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${isActive ? "bg-white text-[#2f8f42]" : "bg-slate-100 text-slate-500"}`}>
-                    {tab.count.toLocaleString()}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-          <Link
-            href="/campaigns/create"
-            className="ml-1 inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-          >
-            <Plus className="h-4 w-4" />
-            Create Campaign
-          </Link>
-        </div>
-      </div>
-
-      {activeTab === "campaigns" && (
-      <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        {[
-          ["Campaigns", campaignPagination.total.toLocaleString()],
-          ["Members", totalStats.memberCount.toLocaleString()],
-          ["Granted", currency(totalStats.totalGranted)],
-          ["Spendable", currency(totalStats.spendableRemaining)],
-        ].map(([label, value]) => (
-          <div key={label} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-            <p className="mt-2 truncate text-xl font-semibold text-slate-950 sm:text-2xl" title={value}>{value}</p>
-          </div>
-        ))}
-      </section>
-      )}
+      ) : null}
 
       {activeTab === "campaigns" && (
       <section className="grid gap-6">
@@ -1157,6 +1096,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               <h3 className="text-base font-semibold text-slate-950">Campaign List</h3>
               <p className="text-sm text-slate-500">Newest first from the admin campaign endpoint.</p>
             </div>
+            <Link href="/campaigns/create" className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"><Plus className="h-4 w-4" />Add campaign</Link>
           </div>
 
           <div className="grid gap-3 md:hidden">
@@ -1181,33 +1121,24 @@ export function CampaignsPanel({ token }: { token: string }) {
                       </span>
                     </div>
                     <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                      <div><dt className="text-xs text-slate-500">Granted</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.totalGranted || 0)}</dd></div>
-                      <div><dt className="text-xs text-slate-500">Spendable</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.spendableRemaining || 0)}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Granted</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.totalGranted)}</dd></div>
+                      <div><dt className="text-xs text-slate-500">Spendable</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.stats?.spendableRemaining)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Expires</dt><dd className="mt-1 font-medium text-slate-800">{dateText(campaign.expiresAt)}</dd></div>
                       <div><dt className="text-xs text-slate-500">Budget</dt><dd className="mt-1 font-medium text-slate-800">{currency(campaign.budgetCap)}</dd></div>
                     </dl>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openEditCampaign(campaign);
-                      }}
-                      className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Edit
-                    </button>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); openEditCampaign(campaign); }} className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"><Pencil className="h-4 w-4" />Edit</button>
                   </div>
                 );
               })
             )}
           </div>
 
-          <div className="hidden overflow-hidden rounded-lg border border-slate-200 md:block">
+          <div className="hidden overflow-x-auto rounded-lg border border-slate-200 md:block">
             <div className="max-h-96 overflow-auto">
-              <table className="min-w-full text-sm">
+              <table className="campaign-table min-w-[900px] text-sm">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
+                    <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">#</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Campaign</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Expires</th>
@@ -1220,12 +1151,12 @@ export function CampaignsPanel({ token }: { token: string }) {
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {campaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
+                      <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
                         No campaigns loaded yet.
                       </td>
                     </tr>
                   ) : (
-                    campaigns.map((campaign) => {
+                    campaigns.map((campaign, index) => {
                       const status = effectiveStatus(campaign);
                       return (
                         <tr
@@ -1233,6 +1164,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                           onClick={() => selectCampaign(campaign)}
                           className={`cursor-pointer transition hover:bg-slate-50 ${selectedCampaignId === campaign.id ? "bg-[#48C05C]/10" : ""}`}
                         >
+                          <td className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
                           <td className="px-4 py-3">
                             <p className="font-medium text-slate-950">{campaign.name}</p>
                             <p className="text-xs text-slate-400">{campaign.code}</p>
@@ -1243,22 +1175,10 @@ export function CampaignsPanel({ token }: { token: string }) {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-slate-600">{dateText(campaign.expiresAt)}</td>
-                          <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.totalGranted || 0)}</td>
-                          <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.spendableRemaining || 0)}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.totalGranted)}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.stats?.spendableRemaining)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{currency(campaign.budgetCap)}</td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openEditCampaign(campaign);
-                              }}
-                              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Edit
-                            </button>
-                          </td>
+                          <td className="campaign-actions whitespace-nowrap px-4 py-3 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); openEditCampaign(campaign); }} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"><Pencil className="h-3.5 w-3.5" />Edit</button></td>
                         </tr>
                       );
                     })
@@ -1272,6 +1192,36 @@ export function CampaignsPanel({ token }: { token: string }) {
       </section>
       )}
 
+      {activeTab === "overview" && selectedCampaign && (
+        <section className="campaign-detail-hero surface p-5 sm:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(selectedEffectiveStatus)}`}>{selectedEffectiveStatus}</span><span className="text-xs text-slate-500">Campaign code {selectedCampaign.code}</span></div>
+              <h2 className="mt-3 truncate text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">{selectedCampaign.name}</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">{selectedCampaign.description || "No campaign description provided."}</p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2"><button type="button" className="ui-button" onClick={() => openEditCampaign(selectedCampaign)}><Pencil className="h-4 w-4" />Edit</button></div>
+          </div>
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            {[['Members', selectedCampaign.stats?.memberCount?.toLocaleString() ?? "—"], ['Budget', currency(selectedCampaign.budgetCap)], ['Granted', currency(selectedCampaign.stats?.totalGranted)], ['Spent', currency(selectedCampaign.stats?.totalSpent)], ['Spendable', currency(selectedCampaign.stats?.spendableRemaining)], ['Budget remaining', currency(selectedCampaign.stats?.budgetRemaining)]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-[11px] font-medium text-slate-500">{label}</p><p className="mt-1 truncate text-sm font-semibold text-slate-950" title={value}>{value}</p></div>)}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "overview" && selectedCampaign && (
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,.8fr)]">
+          <div className="surface p-5 sm:p-6"><div className="mb-5"><p className="eyebrow">Campaign overview</p><h3 className="mt-1 text-base font-semibold">Details and eligibility</h3></div><dl className="grid gap-4 sm:grid-cols-2"><div><dt className="text-xs font-medium text-slate-500">Created</dt><dd className="mt-1 text-sm font-medium">{dateText(selectedCampaign.createdAt)}</dd></div><div><dt className="text-xs font-medium text-slate-500">Last updated</dt><dd className="mt-1 text-sm font-medium">{dateText(selectedCampaign.updatedAt)}</dd></div><div><dt className="text-xs font-medium text-slate-500">Expires</dt><dd className="mt-1 text-sm font-medium">{dateText(selectedCampaign.expiresAt)}</dd></div><div><dt className="text-xs font-medium text-slate-500">Allowed services</dt><dd className="mt-1 text-sm font-medium">{selectedCampaign.allowedTools?.length ? selectedCampaign.allowedTools.map((tool) => serviceName(services, tool)).join(", ") : "No services specified"}</dd></div></dl><div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-medium text-slate-500">Description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selectedCampaign.description || "No description provided."}</p></div></div>
+          <div className="surface p-5 sm:p-6"><div className="mb-5"><p className="eyebrow">Budget health</p><h3 className="mt-1 text-base font-semibold">Utilization from campaign stats</h3></div>{selectedCampaign.budgetCap !== null && selectedCampaign.stats?.totalGranted !== undefined ? <><div className="flex items-end justify-between gap-3"><div><p className="text-3xl font-semibold tracking-tight">{Math.min(100, Math.round((selectedCampaign.stats.totalGranted / Math.max(selectedCampaign.budgetCap, 1)) * 100))}%</p><p className="text-xs text-slate-500">of budget granted</p></div><p className="text-right text-sm font-medium">{currency(selectedCampaign.stats.totalGranted)}<span className="font-normal text-slate-500"> / {currency(selectedCampaign.budgetCap)}</span></p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#2f9e5b]" style={{ width: `${Math.min(100, Math.round((selectedCampaign.stats.totalGranted / Math.max(selectedCampaign.budgetCap, 1)) * 100))}%` }} /></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><div><p className="text-xs text-slate-500">Budget remaining</p><p className="mt-1 font-semibold">{currency(selectedCampaign.stats.budgetRemaining)}</p></div><div><p className="text-xs text-slate-500">Spendable remaining</p><p className="mt-1 font-semibold">{currency(selectedCampaign.stats.spendableRemaining)}</p></div></div></> : <div className="rounded-lg border border-dashed border-slate-200 p-5 text-sm text-slate-500">Budget utilization is unavailable because the backend did not return a budget cap and granted total.</div>}</div>
+        </section>
+      )}
+
+      {activeTab === "settings" && selectedCampaign && (
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,.7fr)]">
+          <div className="space-y-6"><div className="surface p-5 sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="eyebrow">General settings</p><h3 className="mt-1 text-base font-semibold">Campaign configuration</h3><p className="mt-1 text-sm text-slate-500">Update name, description, budget, services, and expiry together.</p></div><button type="button" className="ui-button" onClick={() => openEditCampaign(selectedCampaign)}><Pencil className="h-4 w-4" />Edit campaign</button></div><dl className="mt-5 grid gap-4 sm:grid-cols-2"><div><dt className="text-xs text-slate-500">Name</dt><dd className="mt-1 text-sm font-medium">{selectedCampaign.name}</dd></div><div><dt className="text-xs text-slate-500">Budget cap</dt><dd className="mt-1 text-sm font-medium">{currency(selectedCampaign.budgetCap)}</dd></div><div><dt className="text-xs text-slate-500">Expiry</dt><dd className="mt-1 text-sm font-medium">{dateText(selectedCampaign.expiresAt)}</dd></div><div><dt className="text-xs text-slate-500">Allowed services</dt><dd className="mt-1 text-sm font-medium">{selectedCampaign.allowedTools?.length ? selectedCampaign.allowedTools.map((tool) => serviceName(services, tool)).join(", ") : "No services specified"}</dd></div></dl></div><div className="surface p-5 sm:p-6"><p className="eyebrow">Lifecycle</p><h3 className="mt-1 text-base font-semibold">Change campaign state</h3><p className="mt-1 text-sm text-slate-500">Expired campaigns can be revived by extending their expiry date. Ended campaigns are terminal.</p><div className="mt-5 grid gap-2 sm:grid-cols-3">{(["active", "paused", "ended"] as CampaignStatus[]).map((status) => <button key={status} type="button" onClick={() => void handleStatusChange(status)} disabled={loading || (selectedIsEnded && status === "active")} className="ui-button capitalize">{status}</button>)}</div></div></div>
+          <div className="surface h-fit border-rose-200 p-5 sm:p-6"><p className="text-xs font-semibold uppercase tracking-[.12em] text-rose-600">Danger zone</p><h3 className="mt-2 text-base font-semibold">Delete campaign</h3><p className="mt-2 text-sm leading-6 text-slate-500">This soft-deletes the campaign. Unspent member credit may be forfeited or reclaimed according to the backend response.</p><button type="button" className="ui-button ui-danger mt-5 w-full" disabled={loading || selectedIsDeleted} onClick={() => void handleDelete()}><Trash2 className="h-4 w-4" />Delete campaign</button></div>
+        </section>
+      )}
+
       {activeTab === "users" && (
       <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex flex-col gap-3">
@@ -1282,18 +1232,13 @@ export function CampaignsPanel({ token }: { token: string }) {
             </div>
             <p className="mt-1 text-sm text-slate-500">Server-side user filters support select-all funding without loading every page.</p>
           </div>
-          <FilterBar label="Find users" summary={[userSearch, userRole, userHasBonus !== "all" ? `Bonus: ${userHasBonus}` : ""].filter(Boolean).join(" / ") || "All users"}>
+          <FilterBar label="" summary={[userSearch, userRole, userHasBonus !== "all" ? `Bonus: ${userHasBonus}` : ""].filter(Boolean).join(" / ") || "All users"}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
             <input value={userRole} onChange={(event) => setUserRole(event.target.value)} placeholder="Role" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
             <CustomSelect value={userHasBonus} options={bonusSelectOptions} onChange={setUserHasBonus} ariaLabel="Filter users by bonus" />
-            <button onClick={() => loadUsers(1)} disabled={loading} className="min-h-11 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
-              Load users
-            </button>
-            <button onClick={handleSelectAllFilteredUsers} disabled={loading} className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">
-              Select all filtered
-            </button>
           </div>
+          <div className="filter-actions mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4"><button onClick={() => loadUsers(1)} disabled={loading} className="min-h-11 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">Load users</button><button onClick={() => setSelectedUserIds((ids) => Array.from(new Set([...ids, ...users.map((user) => user.userId || user.id || "").filter(Boolean)])))} disabled={loading || !users.length} className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">Select visible page</button><button onClick={handleSelectAllFilteredUsers} disabled={loading} className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">Select all filtered</button><button onClick={() => { setSelectedUserIds([]); setSelectedUserAmounts({}); setSelectAllTotal(null); }} disabled={loading || !selectedUserIds.length} className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">Clear selection</button></div>
           </FilterBar>
           <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <span>
@@ -1301,8 +1246,8 @@ export function CampaignsPanel({ token }: { token: string }) {
                 ? `${selectAllTotal.toLocaleString()} filtered user(s) selected`
                 : `${selectedUserIds.length.toLocaleString()} visible user(s) selected`}
             </span>
-            <button onClick={handleFundSelectedUsers} disabled={!canFundSelected || !selectedUserIds.length} className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-50">
-              Fund selected users
+            <button onClick={() => setActiveTab("funding")} disabled={!canFundSelected || !selectedUserIds.length} className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-50">
+              Continue to funding
             </button>
           </div>
         </div>
@@ -1311,9 +1256,11 @@ export function CampaignsPanel({ token }: { token: string }) {
           <table className="mobile-card-table min-w-[820px] text-sm">
             <thead className="bg-slate-50">
               <tr>
+                <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">#</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Select</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">User</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Role</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Amount override</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Bonus balance</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Bonus count</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Created</th>
@@ -1322,13 +1269,14 @@ export function CampaignsPanel({ token }: { token: string }) {
             <tbody className="divide-y divide-slate-100">
               {!users.length ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">No users loaded.</td>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">No users loaded.</td>
                 </tr>
-              ) : users.map((user) => {
+              ) : users.map((user, index) => {
                 const summary = displayUser(user);
                 const id = user.userId || user.id || "";
                 return (
                   <tr key={id || summary.primary}>
+                    <td data-label="#" className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
                     <td data-label="Select" className="px-4 py-3">
                       <input aria-label={`Select ${summary.primary}`} type="checkbox" checked={Boolean(id && selectedUserIds.includes(id))} disabled={!id || loading} onChange={(event) => handleSelectVisibleUser(id, event.target.checked)} className="h-4 w-4 accent-[#48C05C]" />
                     </td>
@@ -1337,6 +1285,7 @@ export function CampaignsPanel({ token }: { token: string }) {
                       {summary.secondary && <p className="text-xs text-slate-400">{summary.secondary}</p>}
                     </td>
                     <td data-label="Role" className="px-4 py-3 text-slate-600">{user.role || "-"}</td>
+                    <td data-label="Amount override" className="px-4 py-3"><input type="number" min="1" placeholder="Shared" disabled={!id || !selectedUserIds.includes(id) || selectAllTotal !== null} value={selectedUserAmounts[id] || ""} onChange={(event) => setSelectedUserAmounts((values) => ({ ...values, [id]: event.target.value }))} className="w-28 rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:bg-slate-50"/></td>
                     <td data-label="Bonus balance" className="px-4 py-3 text-right text-slate-600">{currency(user.bonusBalance || 0)}</td>
                     <td data-label="Bonus count" className="px-4 py-3 text-right text-slate-600">{(user.bonusCount || 0).toLocaleString()}</td>
                     <td data-label="Created" className="px-4 py-3 text-slate-600">{dateText(user.createdAt)}</td>
@@ -1358,6 +1307,13 @@ export function CampaignsPanel({ token }: { token: string }) {
             <div>
               <h3 className="text-base font-semibold text-slate-950">Campaign Members</h3>
               <p className="text-sm text-slate-500">Paginated members include user names, email, grant, spend, remaining, and status.</p>
+            </div>
+            <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm text-slate-600">{selectedMemberIds.length} member(s) selected</span>
+              <div className="flex gap-2">
+                <button type="button" className="ui-button" disabled={!members.length || loading} onClick={() => setSelectedMemberIds(members.filter((member) => member.status === "active").map((member) => member.userId))}>Select active page</button>
+                <button type="button" className="ui-button border-rose-200 text-rose-700" disabled={!selectedMemberIds.length || loading} onClick={() => void handleRevoke()}>Revoke selected</button>
+              </div>
             </div>
             <div className="grid gap-3 rounded-lg bg-slate-50 p-3 lg:grid-cols-[minmax(220px,1fr)_auto] lg:items-start">
               <div className="grid gap-2 sm:grid-cols-[minmax(180px,240px)_auto]">
@@ -1406,7 +1362,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Members</p>
-                <p className="text-sm font-semibold text-slate-950">{selectedCampaign.stats?.memberCount || 0}</p>
+                <p className="text-sm font-semibold text-slate-950">{selectedCampaign.stats?.memberCount?.toLocaleString() ?? "—"}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Expires</p>
@@ -1415,19 +1371,19 @@ export function CampaignsPanel({ token }: { token: string }) {
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Budget left</p>
                 <p className="text-sm font-semibold text-slate-950">
-                  {currency(selectedCampaign.stats?.budgetRemaining ?? (selectedCampaign.budgetCap == null ? null : selectedCampaign.budgetCap - (selectedCampaign.stats?.totalGranted || 0)))}
+                  {currency(selectedCampaign.stats?.budgetRemaining ?? (selectedCampaign.budgetCap != null && selectedCampaign.stats?.totalGranted !== undefined ? selectedCampaign.budgetCap - selectedCampaign.stats.totalGranted : undefined))}
                 </p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Spendable left</p>
-                <p className="text-sm font-semibold text-slate-950">{currency(selectedCampaign.stats?.spendableRemaining || 0)}</p>
+                <p className="text-sm font-semibold text-slate-950">{currency(selectedCampaign.stats?.spendableRemaining)}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3">
                 <p className="text-xs text-slate-500">Services</p>
                 <p className="truncate text-sm font-semibold capitalize text-slate-950">
                   {selectedCampaign.allowedTools?.length
                     ? selectedCampaign.allowedTools.map((tool) => serviceName(services, tool)).join(", ")
-                    : "All services"}
+                    : "No services specified"}
                 </p>
               </div>
             </div>
@@ -1442,10 +1398,10 @@ export function CampaignsPanel({ token }: { token: string }) {
                 return (
                   <div key={`${member.userId}-${user.primary}`} className="rounded-xl border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
+                      <div className="flex min-w-0 items-start gap-3"><input type="checkbox" aria-label={`Select ${user.primary}`} disabled={member.status !== "active"} checked={selectedMemberIds.includes(member.userId)} onChange={(event) => setSelectedMemberIds((ids) => event.target.checked ? [...new Set([...ids, member.userId])] : ids.filter((id) => id !== member.userId))} className="mt-1 h-4 w-4 accent-[#48C05C]"/><div className="min-w-0">
                         <p className="truncate font-semibold text-slate-950">{user.primary}</p>
                         {user.secondary && <p className="truncate text-xs text-slate-400">{user.secondary}</p>}
-                      </div>
+                      </div></div>
                       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(member.status)}`}>{member.status}</span>
                     </div>
                     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
@@ -1456,6 +1412,8 @@ export function CampaignsPanel({ token }: { token: string }) {
                     <p className="mt-3 text-xs text-slate-500">
                       {member.spendable ? "Spendable now" : "Not currently spendable"} · {dateText(member.expiresAt)}
                     </p>
+                    {member.status === "active" && <button type="button" className="mt-3 text-sm font-medium text-rose-700" onClick={() => void handleRevoke([member.userId])}>Revoke unused credit</button>}
+                    <button type="button" className="ml-4 mt-3 text-sm font-medium text-emerald-700" onClick={() => { setSingleFundAmount("500"); setMemberToFund(member); }}>Add funds</button>
                   </div>
                 );
               })
@@ -1467,6 +1425,8 @@ export function CampaignsPanel({ token }: { token: string }) {
               <table className="min-w-[760px] text-sm">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
+                    <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">#</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Select</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">User</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Granted</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Spent</th>
@@ -1475,18 +1435,21 @@ export function CampaignsPanel({ token }: { token: string }) {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Tools</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Expires</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {!members.length ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">No members loaded.</td>
+                      <td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-500">No members loaded.</td>
                     </tr>
                   ) : (
-                    members.map((member) => {
+                    members.map((member, index) => {
                       const user = displayUser(member);
                       return (
                         <tr key={`${member.userId}-${user.primary}`}>
+                          <td className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
+                          <td className="px-4 py-3"><input type="checkbox" aria-label={`Select ${user.primary}`} disabled={member.status !== "active"} checked={selectedMemberIds.includes(member.userId)} onChange={(event) => setSelectedMemberIds((ids) => event.target.checked ? [...new Set([...ids, member.userId])] : ids.filter((id) => id !== member.userId))} className="h-4 w-4 accent-[#48C05C]"/></td>
                           <td className="px-4 py-3">
                             <p className="font-medium text-slate-950">{user.primary}</p>
                             {user.secondary && <p className="text-xs text-slate-400">{user.secondary}</p>}
@@ -1495,11 +1458,12 @@ export function CampaignsPanel({ token }: { token: string }) {
                           <td className="px-4 py-3 text-right text-slate-600">{currency(member.spent)}</td>
                           <td className="px-4 py-3 text-right text-slate-600">{currency(member.remaining)}</td>
                           <td className="px-4 py-3 text-slate-600">{member.spendable ? "Yes" : "No"}</td>
-                          <td className="px-4 py-3 text-slate-600">{member.allowedTools?.length ? member.allowedTools.map((tool) => serviceName(services, tool)).join(", ") : "All"}</td>
+                          <td className="px-4 py-3 text-slate-600">{member.allowedTools?.length ? member.allowedTools.map((tool) => serviceName(services, tool)).join(", ") : "Not specified"}</td>
                           <td className="px-4 py-3 text-slate-600">{dateText(member.expiresAt)}</td>
                           <td className="px-4 py-3">
                             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(member.status)}`}>{member.status}</span>
                           </td>
+                          <td className="px-4 py-3"><button type="button" className="text-sm font-medium text-emerald-700" onClick={() => { setSingleFundAmount("500"); setMemberToFund(member); }}>Add funds</button></td>
                         </tr>
                       );
                     })
@@ -1528,30 +1492,24 @@ export function CampaignsPanel({ token }: { token: string }) {
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
                 placeholder="Shared amount"
               />
-              <input
-                value={fundRole}
-                onChange={(event) => setFundRole(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
-                placeholder="Optional role for async select all"
-              />
-              <textarea
-                value={fundMembers}
-                onChange={(event) => setFundMembers(event.target.value)}
-                rows={5}
-                placeholder="Paste emails or user IDs. Use email:amount for row overrides."
-                className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
-              />
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-medium text-slate-800">Visual user selection</p>
+                <p className="mt-1 text-sm text-slate-500">{selectAllTotal !== null ? `${selectAllTotal.toLocaleString()} matching users selected` : `${selectedUserIds.length.toLocaleString()} users selected`}. Search, filter, choose a page, or select every matching account in the Users tab.</p>
+                <button type="button" className="ui-button mt-3" onClick={() => setActiveTab("users")}><Users size={16}/>{selectedUserIds.length ? "Review selected users" : "Choose users"}</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 rounded-lg bg-emerald-50 p-4 text-sm"><div><p className="text-emerald-700">Recipients</p><p className="mt-1 font-semibold text-emerald-950">{(selectAllTotal ?? selectedUserIds.length).toLocaleString()}</p></div><div><p className="text-emerald-700">Intended allocation</p><p className="mt-1 font-semibold text-emerald-950">{currency(intendedFundingTotal)}</p></div></div>
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input type="checkbox" checked={notifyMembers} onChange={(event) => setNotifyMembers(event.target.checked)} className="h-4 w-4 accent-[#48C05C]" />
                 Notify funded users
               </label>
               <button
-                onClick={handleFund}
-                disabled={!canFundSelected}
+                onClick={handleFundSelectedUsers}
+                disabled={!canFundSelected || !selectedUserIds.length || Number(fundAmount) <= 0}
                 className="mt-auto min-h-11 w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
               >
                 Fund selected campaign
               </button>
+              <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-200 pt-4"><button type="button" className="ui-button" onClick={() => setActiveTab("transactions")}><Wallet className="h-4 w-4" />Transactions</button><button type="button" className="ui-button" onClick={() => setActiveTab("wallet")}><BadgeDollarSign className="h-4 w-4" />Wallet</button></div>
               {fundJob && (
                 <div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">
                   <p className="font-medium capitalize text-slate-700">Job {jobId(fundJob) || "-"} · {fundJob.status}</p>
@@ -1560,6 +1518,10 @@ export function CampaignsPanel({ token }: { token: string }) {
                   {fundJob.error && <p className="text-rose-600">{fundJob.error}</p>}
                 </div>
               )}
+              <div className="mt-3 border-t border-slate-200 pt-4">
+                <div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold">Funding jobs</p><CustomSelect value={jobStatus} options={[{value:"all",label:"All"},{value:"queued",label:"Queued"},{value:"processing",label:"Processing"},{value:"completed",label:"Completed"},{value:"failed",label:"Failed"}]} onChange={setJobStatus} ariaLabel="Funding job status" className="w-36"/></div>
+                <div className="mt-3 space-y-2">{fundJobs.length ? fundJobs.map((job) => <div key={jobId(job)} className="rounded-lg border border-slate-200 p-3 text-sm"><div className="flex items-center justify-between gap-2"><span className="font-medium">{jobId(job) || "Funding job"}</span><span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ${statusClass(job.status)}`}>{job.status}</span></div><p className="mt-1 text-xs text-slate-500">Progress: {job.progress ?? 0}% · Created {dateText(job.createdAt)}</p>{job.summary && <p className="mt-1 text-xs text-slate-600">{summaryText("Result", job.summary)}</p>}{job.error && <p className="mt-1 text-xs text-rose-700">{job.error}</p>}</div>) : <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">No funding jobs in this status.</p>}</div>
+              </div>
             </div>
           </div>
 
@@ -1568,16 +1530,14 @@ export function CampaignsPanel({ token }: { token: string }) {
               <UserMinus className="h-4 w-4 text-rose-600" />
               <h3 className="text-base font-semibold text-slate-950">Revoke / Delete</h3>
             </div>
-            <textarea
-              value={revokeUsers}
-              onChange={(event) => setRevokeUsers(event.target.value)}
-              rows={4}
-              placeholder="Paste user IDs to revoke unused bonus"
-              className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-[#48C05C] focus:bg-white focus:ring-4 focus:ring-[#48C05C]/10"
-            />
+            <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+              Select active members from the Members tab. IDs are taken from the selected records and are never entered manually.
+              <p className="mt-2 font-medium text-slate-800">{selectedMemberIds.length} member(s) selected</p>
+              <button type="button" className="ui-button mt-3" onClick={() => setActiveTab("members")}><Users size={16}/>Choose members</button>
+            </div>
             <button
-              onClick={handleRevoke}
-              disabled={!selectedCampaignId || loading}
+              onClick={() => void handleRevoke()}
+              disabled={!selectedCampaignId || loading || !selectedMemberIds.length}
               className="mt-3 min-h-11 w-full rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
             >
               Revoke unused credit
@@ -1586,7 +1546,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               Deleting a campaign automatically forfeits unused member bonuses.
             </p>
             <button
-              onClick={handleDelete}
+              onClick={() => void handleDelete()}
               disabled={!selectedCampaignId || loading || selectedIsDeleted}
               className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
             >
@@ -1598,9 +1558,20 @@ export function CampaignsPanel({ token }: { token: string }) {
         )}
       </section>
       )}
+      {memberToFund && <SidePanel open title="Fund member" description={`${displayUser(memberToFund).primary} · ${displayUser(memberToFund).secondary}`} onClose={() => setMemberToFund(null)} busy={loading} footer={<><button className="ui-button" onClick={() => setMemberToFund(null)}>Cancel</button><button className="ui-button ui-primary" disabled={loading || Number(singleFundAmount) <= 0} onClick={() => void handleFundOne()}>Add funds</button></>}><div className="grid gap-4"><label className="grid gap-1 text-sm font-medium">Amount (NGN)<input type="number" min="1" value={singleFundAmount} onChange={(event) => setSingleFundAmount(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 px-3"/></label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={notifyMembers} onChange={(event) => setNotifyMembers(event.target.checked)}/>Notify the member by email</label></div></SidePanel>}
+
+      {activeTab === "report" && (
+        <section className="space-y-5">
+          {!selectedCampaignId ? <div className="surface p-10 text-center text-sm text-slate-500">Select a campaign first.</div> : !report ? <div className="surface p-10 text-center text-sm text-slate-500">{loading ? "Loading report…" : "No report returned."}</div> : <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(report.stats || {}).filter(([,value]) => typeof value === "number").map(([key,value]) => <div key={key} className="surface p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{key.replace(/([a-z])([A-Z])/g,"$1 $2")}</p><p className="mt-2 text-xl font-semibold">{reportMetric(key, value as number)}</p></div>)}</div>
+            <div className="surface overflow-hidden"><div className="border-b p-5"><h3 className="font-semibold">Member breakdown</h3><p className="mt-1 text-sm text-slate-500">Values come directly from the campaign report endpoint.</p></div><div className="overflow-x-auto"><table className="min-w-[700px] text-sm"><thead className="bg-slate-50"><tr>{["#","Member","Granted","Spent","Remaining","Status"].map((heading) => <th key={heading} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{heading}</th>)}</tr></thead><tbody className="divide-y">{report.members.map((member, index) => { const user=displayUser(member); return <tr key={member.userId}><td className="px-4 py-3 text-slate-400 tabular-nums">{index + 1}</td><td className="px-4 py-3"><p className="font-medium">{user.primary}</p><p className="text-xs text-slate-500">{user.secondary}</p></td><td className="px-4 py-3">{currency(member.granted)}</td><td className="px-4 py-3">{currency(member.spent)}</td><td className="px-4 py-3">{currency(member.remaining)}</td><td className="px-4 py-3 capitalize">{member.status}</td></tr>; })}</tbody></table></div></div>
+          </>}
+        </section>
+      )}
 
       {(activeTab === "transactions" || activeTab === "wallet") && (
       <section className="grid gap-6 2xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] 2xl:gap-8">
+        <div className="2xl:col-span-2"><button type="button" className="ui-button" onClick={() => setActiveTab("funding")}><ChevronLeft className="h-4 w-4" />Back to funding</button></div>
         {activeTab === "transactions" && (
         <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-4 flex flex-col gap-3">
@@ -1611,17 +1582,21 @@ export function CampaignsPanel({ token }: { token: string }) {
               </div>
               <p className="mt-1 text-sm text-slate-500">Paginated transactions include the user summary from the backend.</p>
             </div>
-            <FilterBar label="Transaction filters" summary={[transactionUserId, transactionReference, transactionType !== "all" ? transactionType : "", transactionStatus !== "all" ? transactionStatus : "", transactionFrom, transactionTo].filter(Boolean).join(" / ") || "All transactions"}>
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <FilterBar label="" summary={[transactionUserId, transactionReference, transactionType !== "all" ? transactionType : "", transactionStatus !== "all" ? transactionStatus : "", transactionFrom, transactionTo].filter(Boolean).join(" / ") || "All transactions"}>
+            <div className="filter-toolbar-layout">
+              <div className="filter-toolbar-scroll">
+                <div className="filter-toolbar-fields grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <input value={transactionUserId} onChange={(event) => setTransactionUserId(event.target.value)} placeholder="User ID" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
               <CustomSelect value={transactionType} options={transactionTypeSelectOptions} onChange={setTransactionType} ariaLabel="Filter transactions by type" />
               <CustomSelect value={transactionStatus} options={transactionStatusSelectOptions} onChange={setTransactionStatus} ariaLabel="Filter transactions by status" />
               <input value={transactionReference} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Reference" className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#48C05C] focus:ring-4 focus:ring-[#48C05C]/10" />
               <input type="date" value={transactionFrom} onChange={(event) => setTransactionFrom(event.target.value)} className="custom-date min-h-11 text-sm" aria-label="Transaction created from" />
               <input type="date" value={transactionTo} onChange={(event) => setTransactionTo(event.target.value)} className="custom-date min-h-11 text-sm" aria-label="Transaction created to" />
-              <button onClick={() => loadTransactions(1)} disabled={loading} className="min-h-11 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50 sm:col-span-2 lg:col-span-1 lg:justify-self-end lg:px-8">
+                </div>
+              </div>
+              <div className="filter-actions"><button onClick={() => loadTransactions(1)} disabled={loading} className="min-h-11 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50 lg:px-8">
                 Load
-              </button>
+              </button></div>
             </div>
             </FilterBar>
           </div>
@@ -1657,6 +1632,7 @@ export function CampaignsPanel({ token }: { token: string }) {
               <table className="min-w-[820px] text-sm">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
+                    <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">#</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">User</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Reference</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
@@ -1668,13 +1644,14 @@ export function CampaignsPanel({ token }: { token: string }) {
                 <tbody className="divide-y divide-slate-100">
                   {!transactions.length ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">No transactions loaded.</td>
+                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">No transactions loaded.</td>
                     </tr>
                   ) : (
-                    transactions.map((transaction) => {
+                    transactions.map((transaction, index) => {
                       const user = displayUser(transaction);
                       return (
                         <tr key={transaction.id}>
+                          <td className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
                           <td className="px-4 py-3">
                             <p className="font-medium text-slate-950">{user.primary}</p>
                             {user.secondary && <p className="text-xs text-slate-400">{user.secondary}</p>}
@@ -1751,6 +1728,7 @@ export function CampaignsPanel({ token }: { token: string }) {
           <table className="mobile-card-table min-w-[720px] text-sm">
             <thead className="bg-slate-50">
               <tr>
+                <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">#</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Bonus</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Remaining</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Expires</th>
@@ -1761,15 +1739,16 @@ export function CampaignsPanel({ token }: { token: string }) {
             <tbody className="divide-y divide-slate-100">
               {!bonusItems.length ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">No live bonus items loaded.</td>
+                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">No live bonus items loaded.</td>
                 </tr>
               ) : (
-                bonusItems.map((item) => (
+                bonusItems.map((item, index) => (
                   <tr key={item.bonusId}>
+                    <td data-label="#" className="px-4 py-3 text-slate-400 tabular-nums">{index + 1}</td>
                     <td data-label="Bonus" className="px-4 py-3 text-slate-950">{item.bonusId}</td>
                     <td data-label="Remaining" className="px-4 py-3 text-right text-slate-600">{currency(item.remaining)}</td>
                     <td data-label="Expires" className="px-4 py-3 text-slate-600">{dateText(item.expiresAt)}</td>
-                    <td data-label="Tools" className="px-4 py-3 text-slate-600">{item.allowedTools?.join(", ") || "All tools"}</td>
+                    <td data-label="Tools" className="px-4 py-3 text-slate-600">{item.allowedTools?.join(", ") || "Not specified"}</td>
                     <td data-label="Campaign status" className="px-4 py-3">
                       {item.campaignStatus ? (
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusClass(item.campaignStatus)}`}>

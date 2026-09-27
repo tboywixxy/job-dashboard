@@ -18,14 +18,17 @@ import {
   MapPin,
   Moon,
   Plus,
+  MessageSquare,
+  Scale,
+  RefreshCw,
   Sun,
+  Users,
   UserCircle,
 } from "lucide-react";
 import { ToastNotice } from "@/components/ToastNotice";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
-import { CampaignMemberFields } from "@/components/CampaignMemberFields";
-import { emptyMemberDraft, prepareCampaignMembers, fundingResultText, fundingFailure } from "@/lib/campaignMembers";
-import { updateCampaign, bulkFundCampaignMembers, createCampaign, listCampaignServices, type CampaignService } from "@/lib/api";
+import { createCampaign, listCampaignServices, type CampaignService } from "@/lib/api";
 import {
   ADMIN_SESSION_EVENT,
   clearAdminSession,
@@ -43,9 +46,12 @@ type Notice = {
 const navItems = [
   { href: "/?view=dashboard", icon: LayoutDashboard, label: "Dashboard", active: false },
   { href: "/?view=campaigns", icon: Gift, label: "Campaigns", active: true },
+  { href: "/?view=users", icon: Users, label: "Users", active: false },
+  { href: "/?view=ledger", icon: Scale, label: "Ledger", active: false },
   { href: "/?view=reports", icon: BarChart3, label: "Reports", active: false },
   { href: "/?view=locations", icon: MapPin, label: "Locations", active: false },
   { href: "/?view=timeline", icon: Clock3, label: "Timeline", active: false },
+  { href: "/?view=feedback", icon: MessageSquare, label: "Feedback", active: false },
 ];
 
 export default function CreateCampaignPage() {
@@ -55,9 +61,6 @@ export default function CreateCampaignPage() {
   const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [memberDraft, setMemberDraft] = useState(emptyMemberDraft);
-  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
-  const [memberResult, setMemberResult] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [budgetCap, setBudgetCap] = useState("");
@@ -66,6 +69,7 @@ export default function CreateCampaignPage() {
   const [allowedTools, setAllowedTools] = useState<string[]>([]);
   const servicesInitialized = useRef(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
   useEffect(() => {
     const savedSession = getStoredAdminSession();
@@ -111,12 +115,14 @@ export default function CreateCampaignPage() {
     setNotice({ tone: "success", text: "Signed in successfully. You can create a campaign now." });
   };
 
-  const handleLogout = () => {
-    if (!window.confirm("Are you sure you want to log out?")) return;
+  const confirmLogout = () => {
+    setLogoutDialogOpen(false);
     clearAdminSession();
     setAdminSession(null);
     setNotice(null);
   };
+
+  const handleLogout = () => setLogoutDialogOpen(true);
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -131,29 +137,12 @@ export default function CreateCampaignPage() {
 
     try {
       const expiry = expiresAt ? new Date(`${expiresAt}T23:59:59.999`).toISOString() : null;
-      const pendingMembers = prepareCampaignMembers(memberDraft, "active", expiry);
       const input = { name: name.trim(), description: description.trim(), allowedTools,
         budgetCap: budgetCap ? Number(budgetCap) : null, expiresAt: expiry };
       if (input.budgetCap !== null && (!Number.isFinite(input.budgetCap) || input.budgetCap < 0)) throw new Error("Enter a valid budget cap.");
-      if (input.budgetCap !== null && pendingMembers.reduce((sum, row) => sum + (row.amount || 0), 0) > input.budgetCap) throw new Error("Member bonuses exceed the campaign budget cap.");
-      const result = createdCampaignId
-        ? await updateCampaign(createdCampaignId, input, adminSession?.token)
-        : await createCampaign(input, adminSession?.token);
-      const campaignId = result.data.campaign.id;
-      setCreatedCampaignId(campaignId);
-      if (pendingMembers.length) {
-        try {
-          const funded = await bulkFundCampaignMembers(campaignId, { members: pendingMembers, notify: memberDraft.notify }, adminSession?.token);
-          setMemberDraft(emptyMemberDraft);
-          setMemberResult(`Campaign saved. ${fundingResultText(funded.data)}`);
-          return;
-        } catch (error) {
-          const failure = fundingFailure(error);
-          if (!failure.rejected) setMemberDraft(emptyMemberDraft);
-          setMemberResult(`Campaign saved. ${failure.text}`);
-          return;
-        }
-      }
+      if (expiresAt && new Date(expiry!).getTime() <= Date.now()) throw new Error("Expiration must be in the future.");
+      await createCampaign(input, adminSession?.token);
+      setNotice({ tone: "success", text: "Campaign created. Choose users visually from the campaign workspace to fund members." });
       router.push("/?view=campaigns");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not create campaign.";
@@ -194,7 +183,6 @@ export default function CreateCampaignPage() {
         <form onSubmit={handleCreate} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           {notice && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
 
-          {memberResult && <p role="status" className="mb-4 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{memberResult} <Link href="/?view=campaigns" className="font-medium underline">View campaigns</Link></p>}
           <div className="grid gap-4">
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               Campaign name
@@ -272,19 +260,18 @@ export default function CreateCampaignPage() {
               )}
             </div>
 
-            <CampaignMemberFields value={memberDraft} onChange={setMemberDraft} disabled={loading} />
-
             <button
               type="submit"
               disabled={loading}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#48C05C] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#3aa94e] disabled:opacity-60"
             >
               {!loading && <Plus className="h-4 w-4" />}
-              {loading ? <Skeleton label="Creating campaign" className="h-4 w-28" /> : memberDraft.enabled ? "Save campaign and add members" : createdCampaignId ? "Save campaign" : "Create campaign"}
+              {loading ? <Skeleton label="Creating campaign" className="h-4 w-28" /> : "Create campaign"}
             </button>
           </div>
         </form>
       </div>
+      <ConfirmDialog open={logoutDialogOpen} title="Sign out of the admin workspace?" description="Your current session will be cleared from this browser. You can sign back in at any time." confirmLabel="Sign out" onClose={() => setLogoutDialogOpen(false)} onConfirm={confirmLogout} />
     </DashboardChrome>
   );
 }
@@ -301,14 +288,14 @@ function DashboardChrome({
   children: ReactNode;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  adminSession?: AdminSession | null;
+  adminSession: AdminSession;
   onLogout?: () => void;
   themeMode: ThemeMode;
   onToggleTheme: () => void;
 }) {
   return (
-    <main className="admin-workspace min-h-screen bg-[#f5f7fb] text-slate-950">
-      <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-64"}`}>
+    <main className="admin-workspace min-h-screen">
+      <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20 is-collapsed" : "w-64"}`}>
         <div className={`border-b border-white/15 py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
           <div className={`flex items-center gap-2 ${sidebarCollapsed ? "flex-col justify-center" : "justify-between"}`}>
             <BrandLogo compact={sidebarCollapsed} />
@@ -329,7 +316,7 @@ function DashboardChrome({
               href={item.href}
               title={sidebarCollapsed ? item.label : undefined}
               aria-current={item.active ? "page" : undefined}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${item.active ? "bg-white text-[#48C05C] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"} ${sidebarCollapsed ? "justify-center" : ""}`}
+              className={`admin-nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${item.active ? "is-active" : ""} ${sidebarCollapsed ? "justify-center" : ""}`}
             >
               <item.icon className="h-4 w-4" />
               {!sidebarCollapsed && <span className="font-medium">{item.label}</span>}
@@ -343,27 +330,15 @@ function DashboardChrome({
       </aside>
 
       <div className={`min-w-0 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-20" : "lg:ml-64"}`}>
-        <MobileNavigation items={navItems} onLogout={onLogout} themeMode={themeMode} onToggleTheme={onToggleTheme} />
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 xl:px-8 2xl:px-10">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Create Campaign</h1>
-                <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                  Add a campaign without leaving the dashboard workspace.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onToggleTheme}
-                className="desktop-theme-toggle inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-                aria-label="Toggle theme"
-              >
-                {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                {themeMode === "dark" ? "Light" : "Dark"}
-              </button>
+        <MobileNavigation title="Create Campaign" onRefresh={() => window.location.reload()} items={navItems} onLogout={onLogout} themeMode={themeMode} onToggleTheme={onToggleTheme} />
+        <header className="admin-header">
+          <div className="admin-topbar">
+            <div className="admin-topbar-inner mx-auto max-w-[1600px] px-4 sm:px-6 xl:px-8 2xl:px-10">
+              <span className="admin-topbar-title">Create Campaign</span>
+              <div className="ml-auto flex items-center gap-3"><button type="button" onClick={() => window.location.reload()} className="ui-button desktop-refresh-button" aria-label="Refresh page" title="Refresh page"><RefreshCw className="h-4 w-4" /></button><button type="button" onClick={onToggleTheme} className="ui-button desktop-theme-toggle" aria-label="Toggle theme">{themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button><span className="admin-avatar" aria-hidden="true">{adminSession.displayName.slice(0, 2).toUpperCase()}</span><div className="hidden text-left sm:block"><p className="text-xs font-semibold text-slate-800">{adminSession.displayName}</p><p className="text-[11px] text-slate-500">Administrator</p></div></div>
             </div>
           </div>
+          <div className="admin-header-spacer" aria-hidden="true" />
         </header>
         <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 xl:px-8 2xl:px-10">
           {children}

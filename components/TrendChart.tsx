@@ -68,6 +68,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({
       <table className="w-full border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
           <tr>
+            <th className="w-14 px-4 py-3" scope="col">#</th>
             <th className="px-4 py-3" scope="col">Date</th>
             <th className="px-4 py-3 text-right" scope="col">Total clicks</th>
             <th className="px-4 py-3 text-right" scope="col">Unique URLs</th>
@@ -76,6 +77,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({
         <tbody className="divide-y divide-slate-100">
           {data.map((entry, index) => (
             <tr className="text-slate-700 hover:bg-slate-50" key={`${entry.date}-${index}`}>
+              <td className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
               <th className="whitespace-nowrap px-4 py-3 text-left font-medium text-slate-950" scope="row">{entry.date}</th>
               <td className="px-4 py-3 text-right tabular-nums">{entry.totalClicks.toLocaleString()}</td>
               <td className="px-4 py-3 text-right tabular-nums">{entry.uniqueUrls.toLocaleString()}</td>

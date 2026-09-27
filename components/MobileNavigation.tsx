@@ -3,18 +3,20 @@ import { BrandLogo } from "@/components/BrandLogo";
 
 import { useRef } from "react";
 import Link from "next/link";
-import { LogOut, Menu, Moon, Sun, type LucideIcon } from "lucide-react";
+import { LogOut, Menu, Moon, RefreshCw, Sun, type LucideIcon } from "lucide-react";
 import type { ThemeMode } from "@/lib/theme";
 
 type Item = { label: string; href: string; icon: LucideIcon; active?: boolean };
-export function MobileNavigation({ items, onNavigate, onLogout, themeMode, onToggleTheme }: {
+export function MobileNavigation({ items, onNavigate, onLogout, themeMode, onToggleTheme, title, onRefresh }: {
   items: Item[]; onNavigate?: (href: string) => void; onLogout?: () => void;
-  themeMode: ThemeMode; onToggleTheme: () => void;
+  themeMode: ThemeMode; onToggleTheme: () => void; title?: string; onRefresh?: () => void;
 }) {
   const disclosure = useRef<HTMLDetailsElement>(null);
   return <div className="mobile-header lg:hidden">
     <BrandLogo compact />
-    <div className="flex shrink-0 items-center gap-2">
+    {title && <span className="admin-topbar-title mobile-page-title">{title}</span>}
+    <div className="ml-auto flex shrink-0 items-center gap-2">
+    {onRefresh && <button type="button" className="ui-button !p-2" onClick={onRefresh} aria-label="Refresh page" title="Refresh page"><RefreshCw size={17} /></button>}
     <button type="button" className="ui-button !px-3" onClick={onToggleTheme} aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={themeMode === "dark" ? "Light mode" : "Dark mode"}>
       {themeMode === "dark" ? <Sun size={20} /> : <Moon size={20} />}
     </button>

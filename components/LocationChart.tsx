@@ -20,19 +20,19 @@ export const LocationChart: React.FC<Props> = ({ breakdown }) => {
     </div>
   ) : (
     <div className={`${inModal ? "max-h-[68vh]" : "min-h-0 flex-1"} min-w-0 overflow-auto rounded-lg border border-slate-200`}>
-      <table className="w-full table-fixed border-collapse text-sm">
+      <table className="min-w-full table-auto border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
           <tr>
-            <th className="w-11 px-3 py-3 sm:w-14 sm:px-4" scope="col">#</th>
-            <th className="min-w-0 px-3 py-3 sm:px-4" scope="col">Location</th>
-            <th className="w-20 px-3 py-3 text-right sm:w-28 sm:px-4" scope="col">Clicks</th>
+            <th className="w-14 px-3 py-3 sm:px-4" scope="col">#</th>
+            <th className="min-w-[280px] px-3 py-3 sm:px-4" scope="col">Location</th>
+            <th className="w-28 px-3 py-3 text-right sm:px-4" scope="col">Clicks</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {data.map((entry) => (
             <tr className="text-slate-700 hover:bg-slate-50" key={entry.name}>
               <td className="px-3 py-3 align-top text-slate-400 sm:px-4">{entry.rank}</td>
-              <th className="min-w-0 whitespace-normal break-normal px-3 py-3 text-left font-medium text-slate-950 sm:px-4" scope="row">{entry.name}</th>
+              <th className="min-w-[280px] whitespace-normal break-words px-3 py-3 text-left font-medium text-slate-950 sm:px-4" scope="row">{entry.name}</th>
               <td className="px-3 py-3 text-right align-top font-medium tabular-nums sm:px-4">{entry.clicks.toLocaleString()}</td>
             </tr>
           ))}

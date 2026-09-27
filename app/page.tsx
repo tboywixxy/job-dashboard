@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MobileNavigation } from "@/components/MobileNavigation";
 import { FilterBar } from "@/components/FilterBar";
 import { ToastNotice } from "@/components/ToastNotice";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   BarChart3,
   ChevronLeft,
@@ -17,6 +18,8 @@ import {
   MapPin,
   Moon,
   MessageSquare,
+  Users,
+  Scale,
   RefreshCw,
   Sun,
   UserCircle,
@@ -24,7 +27,8 @@ import {
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { AdminLoginForm } from "@/components/AdminLoginForm";
 import { CampaignsPanel } from "@/components/CampaignsPanel";
-import { JobCategoryChart } from "@/components/JobCategoryChart";
+import { AdminUsersPanel } from "@/components/AdminUsersPanel";
+import { LedgerReconciliationPanel } from "@/components/LedgerReconciliationPanel";
 import { LocationChart } from "@/components/LocationChart";
 import { SummaryCards } from "@/components/SummaryCards";
 import { TopJobsTable } from "@/components/TopJobsTable";
@@ -49,7 +53,7 @@ import {
 import { applyTheme, getInitialTheme, type ThemeMode } from "@/lib/theme";
 
 type SelectedRange = "today" | "yesterday" | "thisWeek" | "thisMonth";
-type ActiveView = "dashboard" | "campaigns" | "reports" | "locations" | "timeline" | "feedback";
+type ActiveView = "dashboard" | "campaigns" | "users" | "ledger" | "reports" | "locations" | "timeline" | "feedback";
 
 const rangeLabels: Record<SelectedRange, string> = {
   today: "Today",
@@ -80,6 +84,7 @@ export default function Page() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [includeTimestamps, setIncludeTimestamps] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
   const [rangeData, setRangeData] = useState<RangeData | null>(null);
   const [rangeLoading, setRangeLoading] = useState(false);
@@ -150,6 +155,8 @@ export default function Page() {
       view === "locations" ||
       view === "timeline" ||
       view === "feedback"
+      || view === "users"
+      || view === "ledger"
     ) {
       setActiveView(view);
     }
@@ -165,8 +172,8 @@ export default function Page() {
     setAdminSession(session);
   };
 
-  const handleLogout = () => {
-    if (!window.confirm("Are you sure you want to log out?")) return;
+  const confirmLogout = () => {
+    setLogoutDialogOpen(false);
     clearAdminSession();
     setAdminSession(null);
     setActiveView("dashboard");
@@ -177,6 +184,8 @@ export default function Page() {
     setLoadError(null);
     setRangeError(null);
   };
+
+  const handleLogout = () => setLogoutDialogOpen(true);
 
   const handleApplyRange = async () => {
     setRangeError(null);
@@ -276,119 +285,112 @@ export default function Page() {
     : rangeLabels[selectedRange];
 
   const navItems = [
-    { view: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
-    { view: "campaigns" as const, icon: Gift, label: "Campaigns" },
-    { view: "reports" as const, icon: BarChart3, label: "Reports" },
-    { view: "locations" as const, icon: MapPin, label: "Locations" },
-    { view: "timeline" as const, icon: Clock3, label: "Timeline" },
-    { view: "feedback" as const, icon: MessageSquare, label: "Feedback" },
+    { section: "Overview", view: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
+    { section: "Management", view: "campaigns" as const, icon: Gift, label: "Campaigns" },
+    { section: "Management", view: "users" as const, icon: Users, label: "Users" },
+    { section: "Finance", view: "ledger" as const, icon: Scale, label: "Ledger" },
+    { section: "Finance", view: "reports" as const, icon: BarChart3, label: "Reports" },
+    { section: "Insights", view: "locations" as const, icon: MapPin, label: "Locations" },
+    { section: "Insights", view: "timeline" as const, icon: Clock3, label: "Timeline" },
+    { section: "Insights", view: "feedback" as const, icon: MessageSquare, label: "Feedback" },
   ];
 
   const pageTitle =
     activeView === "feedback" ? "Admin Feedback" :
     activeView === "campaigns" ? "Campaigns & Bonus Credits" :
+    activeView === "users" ? "Admin Users" :
+    activeView === "ledger" ? "Ledger Reconciliation" :
     activeView === "reports" ? "Reports" :
     activeView === "locations" ? "Location Analytics" :
     activeView === "timeline" ? "Timeline" :
     "Dashboard overview";
 
-  const pageDescription =
-    activeView === "feedback" ? "Listen to your community. Review ratings, explore feedback, and understand what matters." :
-    activeView === "campaigns" ? "Create campaigns, fund existing users, reclaim unused bonus credit, and manage paid wallet backup." :
-    activeView === "reports" ? "Review campaign and job performance reports from the dashboard workspace." :
-    activeView === "locations" ? "Track where job demand and campaign activity are coming from." :
-    activeView === "timeline" ? "Inspect daily click movement and timestamp-led engagement patterns." :
-    "Monitor job clicks, high-performing roles, location demand, and timestamp insights.";
-
   if (!authReady) return <WorkspaceSkeleton />;
   if (!adminSession) return <main className="login-screen"><AdminLoginForm onAuthenticated={handleAuthenticated} /></main>;
 
   return (
-    <main className="admin-workspace min-h-screen bg-[#f5f7fb] text-slate-950">
-      <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden border-r border-[#0f3d20] bg-[#14532d] text-white shadow-xl transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20" : "w-64"}`}>
-        <div className={`border-b border-white/15 py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
+    <main className="admin-workspace min-h-screen">
+      <aside className={`admin-sidebar fixed inset-y-0 left-0 z-30 hidden transition-all duration-300 lg:flex lg:flex-col ${sidebarCollapsed ? "w-20 is-collapsed" : "w-64"}`}>
+        <div className={`py-5 ${sidebarCollapsed ? "px-4" : "px-5"}`}>
           <div className={`flex items-center gap-2 ${sidebarCollapsed ? "flex-col justify-center" : "justify-between"}`}>
             <BrandLogo compact={sidebarCollapsed} />
-            <button type="button" onClick={() => setSidebarCollapsed((value) => !value)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/20 text-white/85 transition hover:bg-white/15" title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            <button type="button" onClick={() => setSidebarCollapsed((value) => !value)} className="sidebar-toggle grid h-8 w-8 shrink-0 place-items-center" title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
               {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
         </div>
         <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto px-4 py-5 text-sm">
-          {!sidebarCollapsed && <p className="nav-section-label">Workspace</p>}
-          {(adminSession ? navItems : []).map((item) => {
-            const isActive = activeView === item.view;
-            return (
-              <button key={item.label} type="button" onClick={() => { setActiveView(item.view); window.history.replaceState(null, "", `/?view=${item.view}`); }} aria-current={activeView === item.view ? "page" : undefined} title={sidebarCollapsed ? item.label : undefined} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${isActive ? "bg-white text-[#48C05C] shadow-sm" : "text-white/80 hover:bg-white/15 hover:text-white"} ${sidebarCollapsed ? "justify-center" : ""}`}>
+          {(["Overview", "Management", "Finance", "Insights"] as const).map((section) => <div key={section} className="nav-group">
+            {!sidebarCollapsed && <p className="nav-section-label">{section}</p>}
+            {(adminSession ? navItems.filter((item) => item.section === section) : []).map((item) => {
+              const isActive = activeView === item.view;
+              return <button key={item.label} type="button" onClick={() => { setActiveView(item.view); window.history.replaceState(null, "", `/?view=${item.view}`); }} aria-current={activeView === item.view ? "page" : undefined} title={sidebarCollapsed ? item.label : undefined} className={`admin-nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${isActive ? "is-active" : ""} ${sidebarCollapsed ? "justify-center" : ""}`}>
                 <item.icon className="h-4 w-4" />
                 {!sidebarCollapsed && <span className="font-medium">{item.label}</span>}
-              </button>
-            );
-          })}
+              </button>;
+            })}
+          </div>)}
         </nav>
-        <div className={`sidebar-account border-t p-3 ${sidebarCollapsed ? "is-collapsed" : ""}`}>
+        <div className={`sidebar-account p-3 ${sidebarCollapsed ? "is-collapsed" : ""}`}>
           {!sidebarCollapsed && <div className="mb-3 flex min-w-0 items-center gap-3 px-2"><UserCircle size={25} /><div className="min-w-0"><p className="truncate text-sm font-medium">{adminSession.displayName}</p><p className="text-xs text-slate-500">Administrator</p></div></div>}
           <button type="button" onClick={handleLogout} className="ui-button logout-button"><LogOut size={16} /><span>Logout</span></button>
         </div>
       </aside>
 
       <div className={`min-w-0 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-20" : "lg:ml-64"}`}>
-      <MobileNavigation items={navItems.map((item) => ({ ...item, href: `/?view=${item.view}`, active: activeView === item.view }))} onNavigate={(href) => { const view = new URLSearchParams(href.split("?")[1]).get("view") as ActiveView; setActiveView(view); window.history.replaceState(null, "", href); }} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => mode === "dark" ? "light" : "dark")} />
-      <header className="admin-header border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 xl:px-8 2xl:px-10">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="eyebrow mb-2">Mastaskillz <span className="mx-2 opacity-40">/</span> Workspace</p>
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                {adminSession ? pageTitle : "Welcome to Mastaskillz"}
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                {adminSession ? pageDescription : "Sign in to manage your workspace."}
-              </p>
+      <MobileNavigation title={pageTitle} onRefresh={() => window.location.reload()} items={navItems.map((item) => ({ ...item, href: `/?view=${item.view}`, active: activeView === item.view }))} onNavigate={(href) => { const view = new URLSearchParams(href.split("?")[1]).get("view") as ActiveView; setActiveView(view); window.history.replaceState(null, "", href); }} onLogout={handleLogout} themeMode={themeMode} onToggleTheme={() => setThemeMode((mode) => mode === "dark" ? "light" : "dark")} />
+      <header className="admin-header">
+          <div className="admin-topbar">
+            <div className="admin-topbar-inner mx-auto max-w-[1600px] px-4 sm:px-6 xl:px-8 2xl:px-10">
+            <span className="admin-topbar-title">{pageTitle}</span>
+            <div className="ml-auto flex items-center gap-3">
+              <button type="button" onClick={() => window.location.reload()} className="ui-button desktop-refresh-button" aria-label="Refresh page" title="Refresh page">
+                <RefreshCw className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))} className="ui-button desktop-theme-toggle" aria-label="Toggle theme">
+                {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
+              <span className="admin-avatar" aria-hidden="true">{adminSession.displayName.slice(0, 2).toUpperCase()}</span>
+              <div className="hidden text-left sm:block"><p className="text-xs font-semibold text-slate-800">{adminSession.displayName}</p><p className="text-[11px] text-slate-500">Administrator</p></div>
             </div>
-            <button
-              type="button"
-              onClick={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
-              className="ui-button desktop-theme-toggle"
-              aria-label="Toggle theme"
-            >
-              {themeMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              {themeMode === "dark" ? "Light" : "Dark"}
-            </button>
           </div>
-
-          {adminSession && activeView === "dashboard" && (
-          <div className="mt-5"><FilterBar label="Date & display" summary={`${activeRangeLabel}${includeTimestamps ? " / Timestamps included" : ""}`}>
-          <section className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
-                Start date
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(event) => setStartDate(event.target.value)}
-                  className="custom-date text-sm font-normal"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
-                End date
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(event) => setEndDate(event.target.value)}
-                  className="custom-date text-sm font-normal"
-                />
-              </label>
+        </div>
+        {adminSession && activeView === "dashboard" && (
+        <div className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
+          <FilterBar label="Date & display" summary={`${activeRangeLabel}${includeTimestamps ? " / Timestamps included" : ""}`}>
+          <div className="filter-toolbar-layout">
+            <div className="filter-toolbar-scroll">
+              <div className="filter-toolbar-fields dashboard-filter-fields">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+                    Start date
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(event) => setStartDate(event.target.value)}
+                      className="custom-date text-sm font-normal"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+                    End date
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(event) => setEndDate(event.target.value)}
+                      className="custom-date text-sm font-normal"
+                    />
+                  </label>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={includeTimestamps} onChange={(event) => setIncludeTimestamps(event.target.checked)} className="h-4 w-4 accent-green-600" />Include timestamps</label>
+              </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-2 sm:flex">
+            <div className="filter-actions">
               <button
                 type="button"
                 onClick={handleApplyRange}
                 disabled={rangeLoading}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {!rangeLoading && <RefreshCw className="h-4 w-4" />}
                 {rangeLoading ? <Skeleton label="Applying range" className="h-4 w-20" /> : "Apply range"}
               </button>
               {usingRange && (
@@ -397,11 +399,10 @@ export default function Page() {
                 </button>
               )}
             </div>
-          </section>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={includeTimestamps} onChange={(event) => setIncludeTimestamps(event.target.checked)} className="h-4 w-4 accent-green-600" />Include timestamps</label>
-          </FilterBar></div>
-          )}
+          </div>
+          </FilterBar>
         </div>
+        )}
       </header>
 
       <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 xl:px-8 2xl:px-10">
@@ -417,7 +418,7 @@ export default function Page() {
           <>
         {rangeError && <ToastNotice tone="error" text={rangeError} onClose={() => setRangeError(null)} />}
         {loadError && <ToastNotice tone="error" text={loadError} index={rangeError ? 1 : 0} onClose={() => setLoadError(null)} />}
-        {!loading && !summary && activeView !== "campaigns" && activeView !== "feedback" && <div className="surface p-8 text-center"><p className="mb-3 text-sm text-slate-500">Analytics are unavailable.</p><button className="ui-button" onClick={() => void loadAnalytics()}>Retry analytics</button></div>}
+        {!loading && !summary && !["campaigns", "feedback", "users", "ledger", "dashboard"].includes(activeView) && <div className="surface p-8 text-center"><p className="mb-3 text-sm text-slate-500">Analytics are unavailable.</p><button className="ui-button" onClick={() => void loadAnalytics()}>Retry analytics</button></div>}
 
         {activeView === "dashboard" && (loading ? (
           <div role="status" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><span className="sr-only">Loading analytics</span>{[1,2,3,4].map((item) => <Skeleton key={item} className="h-40 w-full" />)}</div>
@@ -447,41 +448,30 @@ export default function Page() {
               />
             </section>
 
-            <section className="grid gap-6 xl:grid-cols-3">
-              <div className="xl:col-span-2">
-                <TrendChart
-                  data={trendData}
-                  selectedRange={selectedRange}
-                  totalClicks={totalClicks}
-                />
-              </div>
-              <LocationChart breakdown={locationBreakdown} />
-            </section>
-
-            <section className="space-y-6">
-              <TopJobsTable jobs={topJobs} />
-              <JobCategoryChart breakdown={jobTitleBreakdown} />
-            </section>
           </div>
         ) : null)}
 
         {activeView === "feedback" && <FeedbackPanel token={adminSession.token} />}
 
         {activeView === "campaigns" && <CampaignsPanel token={adminSession.token} />}
+        {activeView === "users" && <AdminUsersPanel token={adminSession.token} />}
+        {activeView === "ledger" && <LedgerReconciliationPanel token={adminSession.token} />}
 
         {activeView === "reports" && (
-          <div className="grid gap-6 xl:grid-cols-3">
-            <div className="xl:col-span-2">
+          <div className="space-y-6">
+            <div>
               <TrendChart data={trendData} selectedRange={selectedRange} totalClicks={totalClicks} />
             </div>
-            <JobCategoryChart breakdown={jobTitleBreakdown} />
+            <TopJobsTable jobs={topJobs} />
           </div>
         )}
 
         {activeView === "locations" && (
           <section className="grid gap-6 xl:grid-cols-3">
-            <LocationChart breakdown={locationBreakdown} />
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
+            <div className="xl:col-span-2">
+              <LocationChart breakdown={locationBreakdown} />
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold">Location Notes</h2>
               <p className="mt-1 text-sm text-slate-500">Location performance currently reflects job click analytics. Campaign funding is scoped by users, not geography, in the available backend contract.</p>
             </div>
@@ -495,6 +485,14 @@ export default function Page() {
         )}
       </div>
       </div>
+      <ConfirmDialog
+        open={logoutDialogOpen}
+        title="Sign out of the admin workspace?"
+        description="Your current session will be cleared from this browser. You can sign back in at any time."
+        confirmLabel="Sign out"
+        onClose={() => setLogoutDialogOpen(false)}
+        onConfirm={confirmLogout}
+      />
     </main>
   );
 }

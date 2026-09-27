@@ -113,6 +113,9 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
           <table className="mobile-card-table min-w-full text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50">
               <tr>
+                <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  #
+                </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Job Title
                 </th>
@@ -151,13 +154,14 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
             <tbody className="divide-y divide-slate-100 bg-white">
               {sortedJobs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
                     No jobs found for this search.
                   </td>
                 </tr>
               ) : (
-                sortedJobs.map((job) => (
+                sortedJobs.map((job, index) => (
                   <tr key={job.shortCode} className="transition hover:bg-slate-50">
+                    <td data-label="#" className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
                     <td data-label="Job" className="px-4 py-3 align-top">
                       <div className="min-w-56">
                         <span className="font-medium text-slate-950">{job.jobTitle}</span>
@@ -225,6 +229,7 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
           <table className="min-w-full text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50">
               <tr>
+                <th className="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">#</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Job Title</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><button type="button" onClick={() => handleSort("location")} className="inline-flex items-center gap-1">Location <ArrowDownUp className="h-3.5 w-3.5" /></button></th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500"><button type="button" onClick={() => handleSort("clicks")} className="ml-auto inline-flex items-center gap-1">Clicks <ArrowDownUp className="h-3.5 w-3.5" /></button></th>
@@ -235,9 +240,10 @@ export const TopJobsTable: React.FC<TopJobsTableProps> = ({ jobs }) => {
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {sortedJobs.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">No jobs found for this search.</td></tr>
-              ) : sortedJobs.map((job) => (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">No jobs found for this search.</td></tr>
+              ) : sortedJobs.map((job, index) => (
                 <tr key={job.shortCode} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-slate-400 tabular-nums">{index + 1}</td>
                   <td className="px-4 py-3"><span className="font-medium text-slate-950">{job.jobTitle}</span><span className="mt-1 block text-xs text-slate-400">{job.shortCode}</span></td>
                   <td className="px-4 py-3 text-slate-600">{job.location || "-"}</td>
                   <td className="px-4 py-3 text-right font-semibold text-[#2f8f42]">{job.clicks.toLocaleString()}</td>
