@@ -65,7 +65,7 @@ export const TrendChart: React.FC<TrendChartProps> = ({
     </div>
   ) : (
     <div className={`${inModal ? "max-h-[68vh]" : "min-h-0 flex-1"} overflow-auto rounded-lg border border-slate-200`}>
-      <table className="w-full border-collapse text-sm">
+      <table className="mobile-card-table w-full border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
           <tr>
             <th className="w-14 px-4 py-3" scope="col">#</th>
@@ -77,10 +77,10 @@ export const TrendChart: React.FC<TrendChartProps> = ({
         <tbody className="divide-y divide-slate-100">
           {data.map((entry, index) => (
             <tr className="text-slate-700 hover:bg-slate-50" key={`${entry.date}-${index}`}>
-              <td className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
-              <th className="whitespace-nowrap px-4 py-3 text-left font-medium text-slate-950" scope="row">{entry.date}</th>
-              <td className="px-4 py-3 text-right tabular-nums">{entry.totalClicks.toLocaleString()}</td>
-              <td className="px-4 py-3 text-right tabular-nums">{entry.uniqueUrls.toLocaleString()}</td>
+              <td data-label="#" className="px-4 py-3 align-top text-slate-400 tabular-nums">{index + 1}</td>
+              <th data-label="Date" className="whitespace-nowrap px-4 py-3 text-left font-medium text-slate-950" scope="row">{entry.date}</th>
+              <td data-label="Total clicks" className="px-4 py-3 text-right tabular-nums">{entry.totalClicks.toLocaleString()}</td>
+              <td data-label="Unique URLs" className="px-4 py-3 text-right tabular-nums">{entry.uniqueUrls.toLocaleString()}</td>
             </tr>
           ))}
         </tbody>

@@ -20,7 +20,7 @@ export const LocationChart: React.FC<Props> = ({ breakdown }) => {
     </div>
   ) : (
     <div className={`${inModal ? "max-h-[68vh]" : "min-h-0 flex-1"} min-w-0 overflow-auto rounded-lg border border-slate-200`}>
-      <table className="min-w-full table-auto border-collapse text-sm">
+      <table className="mobile-card-table min-w-full table-auto border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
           <tr>
             <th className="w-14 px-3 py-3 sm:px-4" scope="col">#</th>
@@ -31,9 +31,9 @@ export const LocationChart: React.FC<Props> = ({ breakdown }) => {
         <tbody className="divide-y divide-slate-100">
           {data.map((entry) => (
             <tr className="text-slate-700 hover:bg-slate-50" key={entry.name}>
-              <td className="px-3 py-3 align-top text-slate-400 sm:px-4">{entry.rank}</td>
-              <th className="min-w-[280px] whitespace-normal break-words px-3 py-3 text-left font-medium text-slate-950 sm:px-4" scope="row">{entry.name}</th>
-              <td className="px-3 py-3 text-right align-top font-medium tabular-nums sm:px-4">{entry.clicks.toLocaleString()}</td>
+              <td data-label="#" className="px-3 py-3 align-top text-slate-400 sm:px-4">{entry.rank}</td>
+              <th data-label="Location" className="min-w-[280px] whitespace-normal break-words px-3 py-3 text-left font-medium text-slate-950 sm:px-4" scope="row">{entry.name}</th>
+              <td data-label="Clicks" className="px-3 py-3 text-right align-top font-medium tabular-nums sm:px-4">{entry.clicks.toLocaleString()}</td>
             </tr>
           ))}
         </tbody>

@@ -886,7 +886,7 @@ export function CampaignsPanel({ token }: { token: string }) {
   };
 
   return (
-    <div className="space-y-5 sm:space-y-6 lg:space-y-8">
+    <div className="campaigns-panel min-w-0 space-y-5 sm:space-y-6 lg:space-y-8">
       {notice && !editingCampaign && <ToastNotice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
       {confirmation && <ConfirmDialog open title={confirmation.title} description={confirmation.description} confirmLabel={confirmation.confirmLabel} tone={confirmation.tone} busy={loading} onClose={() => setConfirmation(null)} onConfirm={() => { const confirm = confirmation.onConfirm; setConfirmation(null); confirm(); }} />}
       {editingCampaign && (
@@ -1310,7 +1310,7 @@ export function CampaignsPanel({ token }: { token: string }) {
             </div>
             <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm text-slate-600">{selectedMemberIds.length} member(s) selected</span>
-              <div className="flex gap-2">
+              <div className="campaign-member-actions flex gap-2">
                 <button type="button" className="ui-button" disabled={!members.length || loading} onClick={() => setSelectedMemberIds(members.filter((member) => member.status === "active").map((member) => member.userId))}>Select active page</button>
                 <button type="button" className="ui-button border-rose-200 text-rose-700" disabled={!selectedMemberIds.length || loading} onClick={() => void handleRevoke()}>Revoke selected</button>
               </div>
@@ -1564,7 +1564,7 @@ export function CampaignsPanel({ token }: { token: string }) {
         <section className="space-y-5">
           {!selectedCampaignId ? <div className="surface p-10 text-center text-sm text-slate-500">Select a campaign first.</div> : !report ? <div className="surface p-10 text-center text-sm text-slate-500">{loading ? "Loading report…" : "No report returned."}</div> : <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(report.stats || {}).filter(([,value]) => typeof value === "number").map(([key,value]) => <div key={key} className="surface p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{key.replace(/([a-z])([A-Z])/g,"$1 $2")}</p><p className="mt-2 text-xl font-semibold">{reportMetric(key, value as number)}</p></div>)}</div>
-            <div className="surface overflow-hidden"><div className="border-b p-5"><h3 className="font-semibold">Member breakdown</h3><p className="mt-1 text-sm text-slate-500">Values come directly from the campaign report endpoint.</p></div><div className="overflow-x-auto"><table className="min-w-[700px] text-sm"><thead className="bg-slate-50"><tr>{["#","Member","Granted","Spent","Remaining","Status"].map((heading) => <th key={heading} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{heading}</th>)}</tr></thead><tbody className="divide-y">{report.members.map((member, index) => { const user=displayUser(member); return <tr key={member.userId}><td className="px-4 py-3 text-slate-400 tabular-nums">{index + 1}</td><td className="px-4 py-3"><p className="font-medium">{user.primary}</p><p className="text-xs text-slate-500">{user.secondary}</p></td><td className="px-4 py-3">{currency(member.granted)}</td><td className="px-4 py-3">{currency(member.spent)}</td><td className="px-4 py-3">{currency(member.remaining)}</td><td className="px-4 py-3 capitalize">{member.status}</td></tr>; })}</tbody></table></div></div>
+            <div className="surface overflow-hidden"><div className="border-b p-5"><h3 className="font-semibold">Member breakdown</h3><p className="mt-1 text-sm text-slate-500">Values come directly from the campaign report endpoint.</p></div><div className="overflow-x-auto"><table className="mobile-card-table min-w-[700px] text-sm"><thead className="bg-slate-50"><tr>{["#","Member","Granted","Spent","Remaining","Status"].map((heading) => <th key={heading} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{heading}</th>)}</tr></thead><tbody className="divide-y">{report.members.map((member, index) => { const user=displayUser(member); return <tr key={member.userId}><td data-label="#" className="px-4 py-3 text-slate-400 tabular-nums">{index + 1}</td><td data-label="Member" className="px-4 py-3"><p className="font-medium">{user.primary}</p><p className="text-xs text-slate-500">{user.secondary}</p></td><td data-label="Granted" className="px-4 py-3">{currency(member.granted)}</td><td data-label="Spent" className="px-4 py-3">{currency(member.spent)}</td><td data-label="Remaining" className="px-4 py-3">{currency(member.remaining)}</td><td data-label="Status" className="px-4 py-3 capitalize">{member.status}</td></tr>; })}</tbody></table></div></div>
           </>}
         </section>
       )}
